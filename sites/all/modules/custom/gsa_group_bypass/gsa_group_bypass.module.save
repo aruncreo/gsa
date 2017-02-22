@@ -1,0 +1,160 @@
+<?php
+
+define('GSA_BYPASS_NO_USERS', 0);
+define('GSA_BYPASS_GSA_USERS', 1);
+define('GSA_BYPASS_GOV_MILL_USERS', 2);
+
+/**
+ * Implements hook_menu().
+ */
+function gsa_group_bypass_menu() {
+  $items = array();
+  $items['group/%/%/admin/bypass'] = array(
+    'title' => t('Bypass settings'),
+    'description' => ('Configure bypass options for this group'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('gsa_group_bypass_group_settings_form', 1, 2),
+    'access callback' => 'gsa_group_bypass_group_settings_form_access',
+    'access arguments' =>  array(1, 2),
+    'file' => 'gsa_group_bypass.pages.inc',
+    'type' => MENU_CALLBACK,
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_menu_alter().
+ */
+function gsa_group_bypass_menu_alter(&$items) {
+  $items['group/%/%/subscribe']['page callback'] = 'gsa_group_bypass_join_callback';
+  $items['group/%/%/subscribe']['module'] = 'gsa_group_bypass';
+  $items['group/%/%/subscribe']['file'] = 'gsa_group_bypass.pages.inc';
+}
+
+/**
+ * Implements hook_og_permission().
+ */
+function gsa_group_bypass_og_permission() {
+  $permissions = array();
+  $permissions['set group bypass options'] = array(
+    'title' => t('Set group bypass options'),
+  );
+  return $permissions;
+}
+
+/**
+ * Implements hook_og_ui_get_group_admin().
+ */
+function gsa_group_bypass_og_ui_get_group_admin() {
+  $items = array();
+  $items['gsa_group_bypass'] = array(
+    'title' => t('Bypass options'),
+    'description' => t('Configure bypass options for this group'),
+    'href' => 'admin/bypass',
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_group_delete().
+ */
+function gsa_group_bypass_group_delete(OgGroup $group) {
+  gsa_group_bypass_save_setting($group);
+}
+
+/**
+ * Determine if for a given group, a user can bypass the group join
+ * rules
+ * 
+ * @param $group
+ *   The group entity
+ * @param $user
+ *   The user object, which defaults to the current user
+ * @return
+ *   TRUE if the user can bypass group join rules
+ */
+function gsa_group_bypass_can_bypass($group, $user = NULL) {
+  // Get the current user if we don't have one
+  if (!$user) {
+    global $user;
+  }
+
+  // See if there is a setting for this group for bypassing
+  if ($setting = gsa_group_bypass_get_group_setting($group)) {
+    // Evaluate based on the setting
+    switch ($setting) {
+      case GSA_BYPASS_GOV_MILL_USERS:
+	        if (gsa_config_user_is_gov_or_mil($user)) {
+          return TRUE;
+        }
+        break;
+        
+      case GSA_BYPASS_GSA_USERS:
+        if (gsa_config_user_is_gsa($user)) {
+          return TRUE;
+        }
+        break;
+    }
+  }
+  
+  return FALSE;
+}
+
+/**
+ * Save the bypass setting for a group
+ * 
+ * If an option was not chosen, the setting will simply be removed
+ * 
+ * @param $group
+ *   The group entity or group id
+ * @param $setting
+ *   The bypass setting
+ */
+function gsa_group_bypass_save_setting($group, $setting = NULL) {
+  // Determine the group id
+  $gid = is_object($group) ? $group->gid : $group;
+
+  // Remove any old settings for this group
+  db_delete('gsa_group_bypass')
+    ->condition('gid', $gid)
+    ->execute();
+  
+  // Save new setting, if one was selected
+  if ($setting !== NULL) {
+    db_insert('gsa_group_bypass')
+      ->fields(array(
+        'gid' => $gid,
+        'setting' => $setting,
+      ))
+      ->execute();
+  }
+}
+
+/**
+ * Fetch the bypass setting for a given group
+ * 
+ * @param $group
+ *   The group entity or group id
+ * @return
+ *   The setting for bypassing for this group
+ */
+function gsa_group_bypass_get_group_setting($group) {
+  return db_select('gsa_group_bypass')
+    ->fields('gsa_group_bypass', array('setting'))
+    ->condition('gid', is_object($group) ? $group->gid : $group)
+    ->execute()
+    ->fetchField();
+}
+
+/**
+ * Access handler for the group bypass options form
+ */
+function gsa_group_bypass_group_settings_form_access($entity_type, $entity_id) {
+  // Load the group
+  if ($group = og_get_group($entity_type, $entity_id)) {
+    if (og_user_access($group->gid, 'set group bypass options') || og_user_access($group->gid, 'administer group')) {
+      return TRUE;
+    }
+  }
+  return FALSE;
+}

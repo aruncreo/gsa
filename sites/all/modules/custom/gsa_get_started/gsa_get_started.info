@@ -1,0 +1,13 @@
+; $Id$
+
+name = "GSA Get Started"
+package = "GSA"
+
+core = "7.x"
+description = "Module to Get Started Block and configuration."
+
+files[] = gsa_get_started.module
+
+configure = admin/config/get-started
+
+version = "7.x-1.0"

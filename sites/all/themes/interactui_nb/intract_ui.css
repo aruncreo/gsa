@@ -1,0 +1,15 @@
+.twocol-30-70 .t.pane-title{
+   color: #EF3A41;
+   font-size: 17px;
+   font-family: Arial, 'Arial Unicode MS', Helvetica, Sans-Serif;
+   font-weight: normal;
+   font-style: normal;
+   margin: 0 5px;
+   text-transform: capitalize;
+}
+.twocol-30-70 .pane-og-featured-content .t.pane-title span{
+    background-position: 0 50%;
+}
+.twocol-30-70 .pane-popular-terms .t.pane-title span{
+    background-position: -25px 50%;
+}

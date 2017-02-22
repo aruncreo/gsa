@@ -1,0 +1,5 @@
+name = "GSA Social"
+package = "GSA"
+core = "7.x"
+description = "Module to add Social Sharing for GSA."
+configure = admin/config/gsa-social

@@ -1,0 +1,19 @@
+.view-gsa-user-group-events .item-list ul {
+  margin: 0;
+}
+
+.view-gsa-user-group-events .item-list ul > li::before {
+  content: none;
+}
+
+.view-gsa-user-group-events .item-list ul li {
+  margin-left: 0;
+  width: 100%;
+  list-style-image: none;
+  padding: 5px;
+}
+
+.view-gsa-user-group-events .item-list ul li span a {
+  padding: 0 4px 0 0;
+  margin: 0;
+}

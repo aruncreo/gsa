@@ -1,0 +1,65 @@
+<?php
+
+/**
+ * Implements hook_schema().
+ */
+function node_menutabs_schema() {
+  $schema = array();
+  
+  $schema['node_menutabs'] = array(
+    'description' => 'A table for storing node menu tabs.',
+    'fields' => array(
+      'nid' => array(
+        'description' => 'The node id.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'title' => array(
+        'description' => 'The menu item title.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'path' => array(
+        'description' => 'The Drupal path for the menu item.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'weight' => array(
+        'description' => 'The menu item weight.',
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+    ),
+    'primary key' => array('path'),
+    'indexes' => array(
+      'nid' => array('nid'),
+    ),
+  );
+  
+  return $schema;
+}
+
+/**
+ * Convert 6.x variable entries to database records.
+ */
+function node_menutabs_update_7001() {
+  $entries = variable_get('node_menutabs_entries', array());
+  foreach ($entries as $nid => $item) {
+    db_insert('node_menutabs')
+    ->fields(array(
+			'nid' => $nid,
+			'path' => $item['path'],
+			'title' => $item['title'],
+			'weight' => $item['weight'],
+    ))
+    ->execute();
+  }
+  variable_del('node_menutabs_entries');
+  menu_rebuild();
+  return array();
+}

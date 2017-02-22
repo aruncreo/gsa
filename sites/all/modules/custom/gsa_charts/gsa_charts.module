@@ -1,0 +1,176 @@
+<?php
+
+include_once('gsa_charts.features.inc');
+
+/**
+ * Implements of hook_menu()
+ */
+function gsa_charts_menu() {
+  $items = array();
+  $items['node/%node/members/demographics'] = array(
+    'title' => 'Demographics',
+    'page callback' => 'gsa_charts_group_demographics_page',
+    'page arguments' => array(1),
+    'access callback' => 'gsa_charts_group_demographics_page_access',
+    'access arguments' => array(1),
+    'file' => 'includes/pages.inc',
+    'weight' => 10,
+    'type' => MENU_LOCAL_TASK,
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_gsa_group_page_group_menu_alter().
+ */
+function gsa_charts_gsa_group_page_group_menu_alter(&$menu, $group, $node) {
+  if (gsa_charts_group_demographics_page_access($node)) {
+    $menu['members']['items']['demographics'] = l(t('Demographics'), "node/{$node->nid}/members/demographics");
+  }
+}
+
+/**
+ * Access callback for the group demographics page
+ */
+function gsa_charts_group_demographics_page_access($node) {
+  // Make sure the node is a group
+  if (!($node->type=='group')) {
+    return FALSE;
+  } else {
+    $group = og_get_group('node', $node->nid);
+  }
+  
+  // Node admins can always access
+  if (user_access('administer nodes')) {
+    return TRUE;
+
+  }
+  
+  // Allow group members in
+  if (og_is_member($group->gid)) {
+    // Only if the group is published
+    if ($node->status) {
+      return TRUE;
+    }
+  }
+
+  return FALSE;
+}
+
+/**
+ * Include .inc files
+ * Similar to ctools_include()
+ * 
+ * @param $file
+ *   The base file name to be included.
+ * @param $module
+ *   Optional module containing the include.
+ * @param $dir
+ *   Optional subdirectory containing the include file.
+ */
+function gsa_charts_include($file, $module = 'gsa_charts', $dir = 'includes') {
+  static $used = array();
+  $dir = '/' . ($dir ? $dir . '/' : '');
+  if (!isset($used[$module][$dir][$file])) {
+    require_once './' . drupal_get_path('module', $module) . "$dir$file.inc";
+    $used[$module][$dir][$file] = TRUE;
+  }
+}
+
+
+/**
+ * Implements hook_block_info().
+ */
+function gsa_charts_block_info() {
+
+  // Many options are defined in hook_block_info():
+  $blocks['membership_count'] = array(
+    'info' => t('Site/group membership count'),
+    'cache' => DRUPAL_CACHE_PER_ROLE, // default
+  );
+  
+  $blocks['chart_is_gsa'] = array(
+    'info' => t('GSA Chart: Is/Is-not GSA'),
+    'cache' => DRUPAL_CACHE_PER_ROLE, // default
+  );
+  
+  $blocks['chart_government'] = array(
+    'info' => t('GSA Chart: Government/Non-government'),
+    'cache' => DRUPAL_CACHE_PER_ROLE, // default
+  );
+  
+  $blocks['chart_military_civilian'] = array(
+    'info' => t('GSA Chart: Military/Civilian/State/Tribal Members'),
+    'cache' => DRUPAL_CACHE_PER_ROLE, // default
+  );
+  
+  $blocks['chart_military_by_branch'] = array(
+    'info' => t('GSA Chart: Military Members by Branch'),
+    'cache' => DRUPAL_CACHE_PER_ROLE, // default
+  );
+  
+  $blocks['chart_top_ten_agencies'] = array(
+    'info' => t('GSA Chart: Top Ten Agencies'),
+    'cache' => DRUPAL_CACHE_PER_ROLE, // default
+  );
+
+  return $blocks;
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function gsa_charts_block_view($delta = '') {
+  gsa_charts_include('charts');
+
+  switch ($delta) {
+    case 'membership_count':
+      $block['content'] = _gsa_charts_membership_count();
+      break;
+      
+    case 'chart_is_gsa':
+      $block['subject'] = t('GSA/non-GSA Members');
+      $block['content'] = _gsa_charts_chart_is_gsa();
+      break;
+      
+    case 'chart_government':
+      $block['subject'] = t("Government/non-Government Members");
+      $block['content'] = _gsa_charts_chart_government();
+      break;
+      
+    case 'chart_military_civilian':
+      $block['subject'] = t("Military/Civilian/State/Tribal Members");
+      $block['content'] = _gsa_charts_chart_military_civilian();
+      break;
+       
+    case 'chart_military_by_branch':
+      $block['subject'] = t("Defense (Civilian and Military) Representation");
+      $block['content'] = _gsa_charts_chart_military_by_branch();
+      break;
+
+    case 'chart_top_ten_agencies':
+      $block['subject'] = t("Top Ten Agencies");
+      $block['content'] = _gsa_charts_chart_top_ten_agencies();
+      break;
+  }
+  return $block;
+}
+
+/**
+ * Implements hook_block_list_alter().
+ */
+function gsa_charts_block_list_alter(&$blocks) {
+  foreach ($blocks as $bid => $block) {
+      unset($blocks[$bid]);
+      $blocks[$bid] = $block;
+      break;
+  }
+}
+
+
+/**
+ * Implements hook_chart_alter().
+ */
+function gsa_charts_chart_alter(&$chart) {
+
+}

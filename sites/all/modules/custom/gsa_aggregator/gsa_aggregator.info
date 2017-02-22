@@ -1,0 +1,14 @@
+; $Id: gsa_aggregator.info 98 2012-08-20 17:07:37Z nikunjk $
+
+name = "GSA Aggregator"
+package = "GSA"
+description = "Module to add Group based aggregator feed sources."
+
+core = 7.x
+
+version = 7.x-1.0
+
+dependencies[] = aggregator
+
+files[] = gsa_aggregator.module
+

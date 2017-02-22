@@ -1,0 +1,6 @@
+name = OG moderation
+description = Allow group admins to moderate node revisions within their groups
+core = 7.x
+dependencies[] = node
+dependencies[] = og
+dependencies[] = og_features

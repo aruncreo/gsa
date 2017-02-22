@@ -1,0 +1,100 @@
+<?php
+
+/**
+ * Implements hook_install().
+ */
+function gsa_wall_install() {
+
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function gsa_wall_uninstall() {
+
+}
+
+/**
+ * Implements hook_schema().
+ */
+function gsa_wall_schema() {
+  $schema = array();
+  
+  $schema['gsa_wall_node_relevance'] = array(
+    'description' => 'A table storing relevance scores for nodes',
+    'fields' => array(
+      'nid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'description' => 'The node ID.',
+      ),
+      'uid' => array(
+        'type' => 'varchar', 
+        'length' => 255, 
+        'not null' => TRUE, 
+        'description' => 'The user ID.',
+      ),
+      'relevance' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => 'The relevance score',
+      ),
+      'indexed' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => 'UNIX timestamp when the score was calcluated.',
+      ),
+    ),
+    'primary key' => array('nid', 'uid'),
+  );
+  
+  return $schema;
+}
+
+/**
+ * Install the relevance table schema.
+ */
+function gsa_wall_update_7001() {
+  drupal_install_schema('gsa_wall');
+}
+
+/**
+ * Enabling ooyala related module.
+ */
+function gsa_wall_update_7002() {
+	$modules = array('gsa_ooyala','ooyala'); // Array of module names
+	$enable_dependencies = TRUE; // Whether or not to enable dependant modules
+	module_enable($modules, $enable_dependencies);
+}
+
+/**
+* Update 7003: Deleteing Ooyala Video field from blog and document content type
+*/
+function gsa_wall_update_7013() {
+  if ($instance = field_info_instance('node', 'field_ooyala_video', 'blog')) {
+    field_delete_instance($instance);
+  }
+  if ($instance = field_info_instance('node', 'field_ooyala_video', 'document')) {
+    field_delete_instance($instance);
+  }
+}
+
+
+/**
+ * Disable and uninstall the ooyala related modules module.
+ */
+function gsa_wall_update_7014() {
+  if( module_exists('gsa_ooyala')) {
+    module_disable(array('gsa_ooyala'));
+    drupal_uninstall_modules(array('gsa_ooyala'));
+  }
+  
+  if( module_exists('ooyala')) {
+    module_disable(array('ooyala'));
+    drupal_uninstall_modules(array('ooyala'));
+  }
+}

@@ -1,0 +1,54 @@
+<?php
+
+/*<?php
+
+*
+ * Update 7201: Enabling GSA Autocomplete Module
+ */
+function gsa_util_update_7201(){  
+
+	$modules = array('gsa_autocomplete'); // Array of module names
+	$enable_dependencies = TRUE; // Whether or not to enable dependant modules
+
+	module_enable($modules, $enable_dependencies);
+}
+
+/**
+ * Update 7202: Deleted before implemented on production.
+ */
+
+/**
+ * Update 7203: Reverting the features gsa_group_content, gsa_event, gsa_cpat,gsa_wall
+ */ 
+function gsa_util_update_7203() {
+   gsa_util_features_revert(array('gsa_group_content','gsa_event','gsa_cpat','gsa_wall')); 
+}
+
+/**
+ * Update 7204: Set the fallback text format to 'plain text'
+ */
+function gsa_util_update_7204() {
+  variable_set('filter_fallback_format', 'plain_text');
+}
+
+/**
+* Function for reverting the features
+*/
+function gsa_util_features_revert($modules) {
+  module_load_include('inc', 'features', 'features.export');
+  features_include();
+  foreach ($modules as $module) {
+    if (($feature = feature_load($module, TRUE)) && module_exists($module)) {
+      $components = array();
+      // Forcefully revert all components of a feature.
+      foreach (array_keys($feature->info['features']) as $component) {
+        if (features_hook($component, 'features_revert')) {
+          $components[] = $component;
+        }
+      }
+    }
+    foreach ($components as $component) {
+      features_revert(array($module => array($component)));
+    }
+  }
+}

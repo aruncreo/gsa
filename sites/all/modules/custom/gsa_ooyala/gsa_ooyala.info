@@ -1,0 +1,8 @@
+name = GSA Ooyala
+description = Provide a custom field to render ooyala video in any content type in gallery format.
+package = GSA
+core = 7.x
+dependencies[] = ooyala
+
+
+

@@ -1,0 +1,205 @@
+<?php
+/**
+ * @file
+ * Code for the GSA Subscriptions feature.
+ */
+
+include_once 'gsa_subscriptions.features.inc';
+
+/**
+ * Implements hook_menu().
+ */
+function gsa_subscriptions_menu() {
+  $items = array();
+  
+  $path = drupal_get_path('module', 'gsa_subscriptions');
+  
+  $items['admin/config/gsa-subscriptions'] = array(
+    'title' => t('GSA Subscriptions'),
+    'description' => t('Configure sitewide default settings for content subscriptions'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('gsa_subscriptions_admin_settings_form'),
+    'access arguments' => array('administer gsa subscriptions'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  return $items;
+}
+
+/**
+ * Implements hook_permission().
+ */
+function gsa_subscriptions_permission() {
+  return array(
+    'administer gsa subscriptions' => array(
+      'title' => 'administer gsa subscriptions',
+    ),
+  );
+}
+
+/**
+ * Implements hook_node_insert().
+ */
+function gsa_subscriptions_node_insert($node) {
+  if ($node->status == NODE_PUBLISHED) {
+    gsa_subscriptions_register_notifications($node, 'new');
+  }
+}
+
+/**
+ * Implements hook_node_update().
+ */
+function gsa_subscriptions_node_update($node) {
+  if ($node->status == NODE_PUBLISHED) {
+    gsa_subscriptions_register_notifications($node, 'updated');
+  }
+}
+
+/**
+ * Implements hook_node_delete().
+ */
+function gsa_subscriptions_node_delete($node) {
+  gsa_subscriptions_delete_notifications($node);
+}
+
+/**
+ * Implements hook_node_view().
+ */
+function gsa_subscriptions_node_view($node, $view_mode) {
+  global $user;
+  if ($view_mode == 'full') {
+    gsa_subscriptions_delete_user_notifications($user->uid, $node);
+  }
+} 
+
+/**
+ * Implements hook_comment_insert().
+ */
+function gsa_subscriptions_comment_insert($comment) {
+  global $user;
+  if ($comment->status == COMMENT_PUBLISHED) {
+    $node = node_load($comment->nid);
+    gsa_subscriptions_register_notifications($node, 'comment');
+  }
+  
+  // Subscribe the comment author to the parent node.
+  if (variable_get('gsa_subscriptions_subscribe_on_comment', FALSE)) {
+    if ($comment->uid == $user->uid) {
+     flag('flag', 'gsa_subscribe_node', $comment->nid, $user);
+    }
+  }
+}
+
+/**
+ * Implements hook_comment_publish().
+ */
+function gsa_subscriptions_comment_publish($comment) {
+  $node = node_load($comment->nid);
+  gsa_subscriptions_register_notifications($node, 'comment');
+}
+
+/**
+ * Implements hook_comment_delete().
+ */
+function gsa_subscriptions_comment_delete($comment) {
+  $node = node_load($comment->nid);
+  gsa_subscriptions_delete_notifications($node, 'comment');
+}
+
+/**
+ * Implements hook_user_delete().
+ */
+function gsa_subscriptions_user_delete($account) {
+  gsa_subscriptions_delete_user_notifications($account->uid);
+}
+
+/**
+ * Implements hook_flag().
+ */
+function gsa_subscriptions_flag($op, $flag, $content_id, $account, $fcid) {
+  if ($op == 'unflag' && $flag->name == 'gsa_subscribe_node') {
+    gsa_subscriptions_delete_user_notifications($account->uid, $content_id);
+  }
+}
+
+/**
+ * Callback to register notifications for all subscribers of a node.
+ */
+function gsa_subscriptions_register_notifications($node, $action) {
+   $subscribers = array();
+
+   // Get subscribers for the content
+   $flags = flag_get_content_flags('node', $node->nid, 'gsa_subscribe_node');
+   if (count($flags)) {
+     $subscribers = array_merge($subscribers, array_keys($flags));
+   }
+   
+   // Get the content's group subscribers
+   $content_group_ids = og_get_entity_groups('node', $node);
+   foreach ($content_group_ids as $gid) {
+     $group = og_load($gid);
+     if ($group->entity_type == 'node') {
+       $group_flags = flag_get_content_flags('node', $group->etid, 'gsa_subscribe_node');
+       if (count($group_flags)) {
+         $subscribers = array_merge($subscribers, array_keys($group_flags));
+       }
+     } else {
+       continue;
+     }
+   }
+   
+   $subscribers = array_unique($subscribers);
+   foreach ($subscribers as $uid) {
+     $merge = db_merge('gsa_subscriptions_notifications')
+     ->key(array('uid' => $uid, 'nid' => $node->nid, 'action' => $action))
+     ->fields(array('timestamp' => date('U')))
+     ->execute();
+   }   
+}
+
+/**
+ * Callback to delete all notifications for a node.
+ *
+ * @param $action
+ *   Optional string to restrict deletions by 'action' field. Defaults
+ *   to removing notifications of all action types.
+ */
+function gsa_subscriptions_delete_notifications($node, $action = NULL) {
+  $db_action = db_delete('gsa_subscriptions_notifications')
+  ->condition('nid', $node->nid);
+  if ($action) {
+    $db_action->condition('action', $action);
+  }
+  $db_action->execute();
+}
+
+/**
+ * Callback to delete a user's notifications.
+ *
+ * @param $node
+ *   Optional node object to restrict deletions to notifications
+ *   pertaining to a single node. Defaults to removing all.
+ */
+function gsa_subscriptions_delete_user_notifications($uid, $node = NULL) {
+  $db_action = db_delete('gsa_subscriptions_notifications')
+  ->condition('uid', $uid);
+  if ($node) {
+    $db_action->condition('nid', $node->nid);
+  }
+  $db_action->execute();
+}
+
+/**
+ * Form builder for configuration page.
+ */
+function gsa_subscriptions_admin_settings_form() {
+  $form = array();
+  
+  $form['gsa_subscriptions_subscribe_on_comment'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Create a subscription when a user comments on a node'),
+    '#default_value' => variable_get('gsa_subscriptions_subscribe_on_comment', FALSE),
+  );
+  
+  return system_settings_form($form);
+}

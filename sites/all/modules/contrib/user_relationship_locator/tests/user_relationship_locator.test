@@ -1,0 +1,28 @@
+<?php
+class UserRelationshipLocatorTestCase extends DrupalWebTestCase {
+ protected $privileged_user;
+
+ public static function getInfo() {
+   return array(
+    'name' => 'User Relationship Locator',
+    'description' => 'Testing locator functionality.',
+    'group' => t('User Relationship Locator'),
+   );
+ }
+
+ public function setUp() {
+   // Enable any modules required for the test.
+   parent::setUp('user_relationship_locator','user_relationships_api', 'user_relationships_ui');
+
+   // Create and log in our privileged user.
+   $this->privileged_user = $this->drupalCreateUser(array('administer user relationships', 'can have relationships', 'can view relationship matches'));
+   $this->drupalLogin($this->privileged_user);
+ }
+
+//Check if we have an active connection to a facebook
+
+//Check to see if we can return a friends list
+//TODO: should this test be part of the provided facebook module or does it make sense here
+
+//
+}

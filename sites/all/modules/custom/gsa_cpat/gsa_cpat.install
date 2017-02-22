@@ -1,0 +1,153 @@
+<?php
+
+/**
+ * Implements hook_schema().
+ */
+function gsa_cpat_schema() {
+  $schema = array();
+  $schema['gsa_cpat_expire'] = array(
+    'description' => 'Track the expiration/renewal of cpat posts and notifications',
+    'fields' => array(
+      'nid' => array(
+        'description' => 'The node ID.',
+        'type' => 'int',
+        'not null' => TRUE
+      ),
+      'renewed' => array(
+        'description' => 'The timestamp for when the node was renewed.',
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0
+      ),
+      'send_notifications' => array(
+        'description' => 'Setting to determine whether to send renewal notifications.',
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 1
+      ),
+      'notifications' => array(
+        'description' => 'Count how many notifications have been sent out.',
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0
+      ),
+    ),
+    'primary key' => array('nid'),
+  );
+  $schema['gsa_cpat_message'] = array(
+    'description' => 'Store messages sent for CTAT opportunities',
+    'fields' => array(
+      'mid' => array(
+        'description' => 'The message ID.',
+        'type' => 'serial',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+      ),
+      'nid' => array(
+        'description' => 'The node ID.',
+        'type' => 'int',
+        'not null' => TRUE
+      ),
+      'sender_uid' => array(
+        'description' => 'The user ID that sent the message.',
+        'type' => 'int',
+        'not null' => TRUE
+      ),
+      'sender_name' => array(
+        'description' => 'The actual name of the user that sent the message.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE
+      ),
+      'sender_mail' => array(
+        'description' => 'The email address of the user that sent the message.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE
+      ),
+      'timestamp' => array(
+        'description' => 'The timestamp for when the message was sent.',
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0
+      ),
+      'reviewed' => array(
+        'description' => 'Whether a message has been reviewed or not.',
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0
+      ),
+      'message' => array(
+        'description' => 'The message text',
+        'type' => 'text',
+        'size' => 'big',
+        'not null' => TRUE,
+      ),
+    ),
+    'primary key' => array('mid'),
+  );
+  
+  return $schema;
+}
+
+/**
+ * Implements hook_install().
+ */
+function gsa_cpat_install() {
+  _gsa_cpat_weight_module();
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function gsa_cpat_uninstall() {
+  variable_del('gsa_cpat_group');
+  variable_del('gsa_cpat_disclaimer');
+  variable_del('gsa_cpat_questionable_threshold');
+  variable_del('gsa_cpat_expiration_days');
+  variable_del('gsa_cpat_renewal_period');
+  variable_del('gsa_cpat_expiration_first_notification');
+  variable_del('gsa_cpat_expiration_second_notification');
+  variable_del('gsa_cpat_wsdl_url');
+  variable_del('gsa_cpat_authentication_demo_mode');
+  variable_del('gsa_cpat_ghp_prompt_join');
+  variable_del('gsa_cpat_ghp_prompt_post');
+  variable_del('gsa_cpat_ghp_prompt_search');
+}
+
+/**
+ * Weight this module accordingly
+ */
+function _gsa_cpat_weight_module() {
+  db_update('system')
+    ->fields(array('weight' => 15))
+    ->condition('name', 'gsa_cpat', '=')
+    ->execute();
+}
+
+/**
+ * Update the module weight
+ */
+function gsa_cpat_update_6000() {
+  _gsa_cpat_weight_module();
+}
+
+/**
+ * Port the CPAT group nid to gid
+ */
+function gsa_cpat_update_7000() {
+  // Ensure OG7 has been updated before proceeding
+  if (drupal_get_installed_schema_version('og', TRUE) < 7000) {
+    throw new DrupalUpdateException('Organic groups must update before GSA CPAT can. Try running update.php again.');
+    return;
+  }
+  
+  // Get the existing group node nid
+  if ($nid = gsa_cpat_get_cpat_group(FALSE)) {
+    // Load the new group entity
+    if ($group = og_get_group('node', $nid)) {
+      // Save the new group gid
+      variable_set('gsa_cpat_group', $group->gid);
+    }
+  }
+}

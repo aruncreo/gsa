@@ -1,0 +1,16 @@
+<?php
+
+include_once('gsa_gallery.features.inc');
+
+/**
+ * Implementation of hook_nodeapi()
+ */
+function gsa_gallery_nodeapi(&$node, $op, $a3 = NULL, $a4 = NULL) {
+  switch ($op) {
+    case 'view':
+      if ($node->type == 'gallery') {
+        drupal_add_css(drupal_get_path('module', 'gsa_gallery') . '/theme/gsa_gallery.css');
+      }
+      break;
+  }
+}

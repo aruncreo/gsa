@@ -1,0 +1,315 @@
+<?php
+
+/**
+ * @file
+ * Allows users with valid permissions to tag profile fields created
+ * from the profile module as required fields for a
+ * users profile to be considered complete.
+ */
+
+/**
+ * Implements hook_theme().
+ */
+function gsa_pcp_theme($existing, $type, $theme, $path) {
+  return array(
+    'gsa_pcp_template' => array(
+      'template' => 'gsa_pcp-template',
+      'variables' => array('complete_data' => NULL),
+    ),
+  );
+}
+
+/**
+ * Implements hook_menu().
+ */
+function gsa_pcp_menu() {
+  $items = array();
+  
+  $items['admin/config/gsa-pcp-settings'] = array(
+    'title' => 'GSA Profile Complete Percentage',
+    'page callback' => 'gsa_pcp_settings',
+    'type' => MENU_NORMAL_ITEM,
+    'access arguments' => array('access administration pages'),
+  );
+  
+  return $items;
+}
+
+
+function gsa_pcp_settings() {
+  $return = drupal_get_form('gsa_pcp_settings_form');
+  return $return;
+}
+
+
+function gsa_pcp_settings_form() {
+  $form = array();
+  
+  $profile_fields = gsa_pcp_get_tagged_profile_fields();
+  $additional_fields = gsa_pcp_get_additional_tagged_fields();
+  $fields = $profile_fields + $additional_fields;
+  
+  $form['gsa_pcp_profile_fields'] = array(
+    '#description' => t('Select the fields to be used for the percentage calculation.'),
+    '#title' => t('User profile fields'),
+    '#type' => 'select',
+    '#multiple' => true,
+    '#options' => $fields,
+    '#default_value' => variable_get('gsa_pcp_profile_fields', array()),
+    '#size' => 15,
+  );
+  
+  $form['gsa_pcp_hide_completed'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Hide "Profile Complete" block if all selected fields are filled out'),
+    '#default_value' => variable_get('gsa_pcp_hide_completed'),
+  );
+  
+  return system_settings_form($form);
+}
+
+
+
+
+/**
+ * Implements hook_block_info().
+ */
+function gsa_pcp_block_info() {
+  // Create block for core user profiles.
+  $blocks['gsa_pcp_profile_percent_complete'] = array(
+      'info' => t('GSA Profile Complete Percentage'),
+  );
+
+  return $blocks;
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function gsa_pcp_block_view($delta = '') {
+  global $user;
+  $block = array();
+
+  //The $delta parameter tells us which block is being requested.
+  switch ($delta) {
+    case 'gsa_pcp_profile_percent_complete':
+      global $user;
+      $out = gsa_pcp_get_complete_percentage_data($user);
+      $hide = variable_get('gsa_pcp_hide_completed', 0);
+
+      if (empty($out) || ($hide == 1 && $out['current_percent'] == '100')) {
+        return NULL;
+      } else {
+        drupal_add_css(drupal_get_path('module', 'gsa_pcp') . '/css/gsa_pcp.theme.css');
+        $subject = t('Profile Complete');
+        $content = theme('gsa_pcp_template', $out);
+      }
+      $block['subject'] = $subject;
+      $block['content'] = $content;
+      break;
+  }
+
+  return $block;
+}
+
+/**
+ * Get the profile complete percentage data for a given user.
+ *
+ * @param $user
+ *   User object
+ *
+ * @return
+ *   PCP data array.
+ */
+function gsa_pcp_get_complete_percentage_data($user) {
+  //   $entity_fields = field_info_instances($entity_type, $bundle);
+
+  // Determine which fields have been tagged for evaluation.
+  $profile_fields = gsa_pcp_get_tagged_profile_fields();
+  $additional_fields = gsa_pcp_get_additional_tagged_fields();
+  $all_fields = $profile_fields + $additional_fields;
+  
+  foreach(variable_get('gsa_pcp_profile_fields', array()) AS $field) {
+    $fields[$field] = $all_fields[$field];
+  }
+
+  $data = array();
+
+  // If no fields have been tagged, indicate that the profile is complete.
+  if (!$fields) {
+    $data['current_percent'] = 100;
+    $data['incomplete'] = 0;
+    return $data;
+  }
+
+  // Gather all profile values for this user.
+  $user_profile_values = gsa_pcp_get_user_profile_values($user->uid);
+  $user_additional_values = gsa_pcp_get_user_additional_values($user->uid);
+  $user_values = $user_profile_values + $user_additional_values;
+
+  $empty_fields = array();
+  foreach ($fields as $key => $field) {
+    if (empty($user_values[$key])) {
+      $empty_fields[$key] = $field;
+    }
+  }
+  if ($empty_fields) {
+    $data['uid'] = $user->uid;
+
+    // Pick up a random field, we won't use shuffle because it reindex the array
+    // keys
+    $fiid = array_rand($empty_fields);
+    if (($fiid)) {
+      $field_title = $fields[$fiid];
+      $field_name = $fields[$fiid];
+    }
+    elseif ($fiid == 'user_picture') {
+      $field_title = $fields[$fiid];
+      $field_name = $fields[$fiid];
+    }
+    $data['nextfield_id'] = $fiid;
+    $data['nextfield_title'] = $field_title;
+    $data['nextfield_name'] = $field_name;
+  }
+  
+  $fields_count = count($fields);
+  $empty_fields_count = count($empty_fields);
+
+  $completed_fields = $fields_count - $empty_fields_count;
+  $current_percent = number_format(($completed_fields / $fields_count), 2) * 100;
+  $next_percent = number_format((($completed_fields + 1) / $fields_count), 2) * 100;
+
+  $data['completed']  = $completed_fields;
+  $data['incomplete'] = $empty_fields_count;
+  $data['total'] = $fields_count;
+
+  $data['current_percent'] = $current_percent;
+  $data['next_percent'] = $next_percent;
+  return $data;
+}
+
+/**
+ * Get all the profile fields stored in the system, tagged or not tagged.
+ */
+/* function pcp_get_profile_fields($params) {
+
+$instances = field_read_instances($params);
+$fields = array();
+foreach ($instances as $instance) {
+$fields[$instance['id']] = $instance['field_name'];
+}
+return $fields;
+}
+*/
+/**
+ * Get all the profile fields that have been tagged.
+ * If an $fiid is passed in, only the data for that field will be returned.
+ *
+ * @param $fiid
+ *   (optional) NULL The field instance id of the field data should be returned for. If null, all fields
+ *   are returned.
+ * @param $entity_type
+ *   (optional) NULL The type of entity to return fields for.
+ * @param $bundle
+ *   (optional) NULL The bundle to return fields for.
+ *
+ * @return
+ *   field instance ID(s) and name(s).
+ */
+function gsa_pcp_get_tagged_profile_fields() {
+  $result = db_select("profile_field")
+  ->fields("profile_field", array())
+  ->orderBy('name')
+  ->execute()
+  ->fetchAll();
+
+  foreach($result as $field) {
+    $options[$field->name] = $field->title;
+  }
+  return $options;
+}
+
+/**
+ * Get all additional tagged fields that where not created
+ * using the profile module. This allows additional PCP
+ * support for other drupal features.
+ */
+function gsa_pcp_get_additional_tagged_fields() {
+  $options = array();
+  $options['user_picture'] = 'User Picture';
+  return $options;
+}
+
+/**
+ * Return a users profile field values that have been saved
+ * for a given user.
+ *
+ * @param int $uid
+ *   The uid of the user we are returning data for.
+ * @param $entity_type
+ *   The type of entity to return fields for.
+ * @param $bundle
+ *   (optional) NULL The bundle to return fields for
+ *
+ * @return assoc array of all profile fields for the user.
+ */
+function gsa_pcp_get_user_profile_values($uid) {
+  $user = user_load($uid);
+  $user_fields = array();
+  // Grab profile values from core profile fields.
+  if (!empty($user)) {
+    $user_fields['profile_name'] = $user->profile_name;
+    $user_fields['profile_last_name'] = $user->profile_last_name;
+    $user_fields['profile_location'] = $user->profile_location;
+    $user_fields['profile_interests'] = $user->profile_interests;
+    $user_fields['profile_aboutme'] = $user->profile_aboutme;
+    $user_fields['profile_job'] = $user->profile_job;
+    $user_fields['profile_agency'] = $user->profile_agency;
+    $user_fields['profile_organization'] = $user->profile_organization;
+    $user_fields['profile_job_category'] = $user->profile_job_category;
+  }
+  return $user_fields;
+}
+
+/**
+ * Return a users additional field values that have been saved
+ * for a given user.
+ *
+ * @param int $uid
+ *   The uid of the user we are returning data for.
+ * @param $entity_type
+ *   The type of entity to return fields for.
+ * @param $bundle
+ *   (optional) NULL The bundle to return fields for
+ *
+ * @return assoc array of all profile fields for the user.
+ */
+function gsa_pcp_get_user_additional_values($uid) {
+  $values = array();
+  if ($uid) {
+    $account = user_load($uid);
+    $values['user_picture'] = $account->picture;
+  }
+  return $values;
+}
+
+
+/**
+ * Implements hook_form_alter().
+ */
+function gsa_pcp_form_alter(&$form, &$form_state, $form_id) {
+  // Add JS that will hightlight target field.
+  drupal_add_js(drupal_get_path('module', 'gsa_pcp') . '/gsa_pcp.js');
+}
+
+/**
+ * Process variables for pcp-template.tpl.php.
+ *
+ * @see gsa_pcp-template.tpl.php
+ */
+function template_preprocess_gsa_pcp_template(&$variables) {
+  if (isset($variables['nextfield_name'])) {
+    $user_edit_path = 'user/' . $variables['uid'] . '/edit';
+    $variables['next_path'] = url($user_edit_path, array('absolute' => TRUE, 'fragment' => $input_name));
+  }
+}

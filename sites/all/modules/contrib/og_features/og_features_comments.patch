@@ -1,0 +1,16 @@
+Index: og_features.module
+===================================================================
+--- og_features.module	(revision 202)
++++ og_features.module	(working copy)
+@@ -767,6 +767,11 @@
+         if ($entity_type) {
+           // Check if we have an entity but no entity_id
+           if ($entity && !$entity_id) {
++            // When creating a comment on a node, the entity found is the node,
++            // not the comment, so get its type.
++            if ($entity_type == 'comment') {
++              $entity_type = $entity->type;
++            }
+             // Extract the entity id
+             list($entity_id) = entity_extract_ids($entity_type, $entity);
+           }

@@ -1,0 +1,68 @@
+Requirements
+------------
+Drupal 7.x, Salesforce.com account, PHP + SOAP enabled, Webform 3.x
+
+
+Upgrading
+------------
+Always make sure to run update.php when upgrading the module to a new version
+
+
+Installation
+------------
+1. Copy the salesforcewebform directory to the Drupal modules directory for your site
+
+2. Download the latest version of the Salesforce PHP Toolkit (Version 20.0 at the time of
+   writing) from http://wiki.apexdevnet.com/index.php/Web_Services_API#PHP under
+   'Toolkits'.
+
+3. Open the zip file from Salesforce and extract the soapclient folder into the 
+   salesforcewebform/includes directory.  You should now have the following structure
+   under your /modules/ directory: salesforcewebform/includes/soapclient
+   
+   ***Depending upon your server configuration, you may need to change the file permissions
+   on the soapclient directory.***
+
+4. Login as an administrator. Enable the module in the "Administer" -> "Build" -> "Modules"
+
+5. Go to "Administer" -> "Configuration" -> "Salesforce Webform" (under the "Development"
+   category).
+  
+   In the 'Path to Salesforce PHP Toolkit' textfield,  enter the absolute path to the 
+   includes folder under salesforcewebform.  (Most users will be able to use the default,
+   but if you experience issues with the toolkit not being found, try entering the absolute
+   path here).
+
+   Enter a valid Salesforce username.
+
+   Enter the corresponding password + API Security token, in the form passwordXXXXXXXX,
+   where 'password' is the account password and xxxxxxxx is the API Security Token.
+   
+   Make sure to check the 'Change Login Information' box so that the login information is
+   stored in the database.
+
+   Save the configuration.  Note that the password will not display (for security reasons),
+   but is stored in the database.
+
+6. In your Salesforce.com screen, add a new custom field 'WebformSID'.  Select that it is
+   a Unique Field and an External ID.  It is very important to add this field, as it
+   maps each Webform submission to an object in Salesforce, and allows edits of the Webform
+   submission to not create a duplicate object; instead, the existing object is updated.
+
+7. Create or edit a webform to match your object form.  Under 'Salesforce Settings', select
+   the 'Yes' option to post the form to Salesforce.
+
+   Make sure that, at a minimum, that your webform contains the minimum required fields from
+   the Salesforce Account, Contact, or Lead form.  An alert will appear at the top of the 
+   Webform configuration pages if you are missing a required field.
+   
+   For each component, you must select a Salesforce field to map to.  Fields are grabbed from
+   Salesforce on-the-fly, so all fields should be displayed for you.
+
+   As the last entry in the Webform, add a hidden field 'SID Key'.  Select 'Webform SID Key'
+   as the Salesforce key to map to. 
+
+   Save the webform.
+
+8. As your object form is submitted (either new or edits), it will be posted via SOAP to 
+   Salesforce automatically.

@@ -1,0 +1,27 @@
+<?php
+/**
+* @file 
+* Provide a field to store ooyala video information with column 'embed_code', 'video_title', 'thumb_url'
+*/
+
+/**
+* Implements hook_field_schema().
+* 
+* @param $field 
+*   A field structure.
+*/
+function gsa_ooyala_field_schema($field) {
+  $columns = array(
+    'embed_code' => array('type' => 'varchar', 'length' => 40, 'not null' => FALSE),
+	'video_title' => array('type' => 'varchar', 'length' => 200, 'not null' => FALSE),
+	'thumb_url' => array('type' => 'varchar', 'length' => 1000, 'not null' => FALSE),
+	'video_des' => array('type' => 'varchar', 'length' => 255, 'not null' => FALSE),
+  );
+  $indexes = array(
+    'embed_code' => array('embed_code'),
+  );
+  return array(
+    'columns' => $columns,
+    'indexes' => $indexes,
+  );
+}

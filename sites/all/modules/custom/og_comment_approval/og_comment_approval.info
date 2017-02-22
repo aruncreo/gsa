@@ -1,0 +1,13 @@
+name = OG Comment Approval
+core = 7.x
+package = Features
+php = 5.2.4
+dependencies[] = comment_og
+dependencies[] = og_context
+dependencies[] = views_bulk_operations
+features[ctools][] = views:views_default:3.0
+features[features_api][] = api:1
+features[views_view][] = og_comment_approval
+features_exclude[dependencies][ctools] = ctools
+features_exclude[dependencies][views] = views
+project path = sites/all/modules/custom

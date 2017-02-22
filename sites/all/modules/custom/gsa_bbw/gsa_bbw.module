@@ -1,0 +1,195 @@
+<?php
+
+/**
+ * Implementation of hook_menu().
+ */
+function gsa_bbw_menu() {
+  $items = array();
+  $items['admin/config/group/gsabbw'] = array(
+    'title' => 'GSA BBW',
+    'description' => 'Business Breakthrough Workshops',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('gsa_bbw_admin_settings'),
+    'access arguments' => array('administer BBW'),
+    'file' => 'gsa_bbw.admin.inc',
+    'type' => MENU_NORMAL_ITEM,
+  );
+  return $items;
+}
+
+/**
+ * Implementation of hook_perm().
+ */
+function gsa_bbw_perm() {
+  return array('administer BBW');
+}
+
+/**
+ * Implementation of hook_init()
+ */
+function gsa_bbw_init() {
+  // If a request is being made to join a group, and that group
+  // is a BBW group, we must redirect it to the specified webform
+  if (arg(0) == 'group') {
+    // 'bypass' provided by gsa_group_bypass.module
+    if (arg(3) == 'subscribe' || arg(1) == 'bypass') {
+      if (is_numeric(arg(2))) {
+        if (arg(2) == _gsa_bbw_load('group', FALSE)) {
+          // Make sure we have a webform to redirect to
+          if ($webform = _gsa_bbw_load('webform', FALSE)) {
+            // Make sure user is logged in
+            if (user_is_logged_in()) {
+              // Make sure the user hasn't already responded to this webform
+              if (!gsa_bbw_has_responded()) {
+                // Make sure the user isn't a member yet
+                if (!og_is_member(arg(2))) {
+                  unset($_REQUEST['destination']);
+                  drupal_goto("node/{$webform}");
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Implementation of hook_form_alter().
+ */
+function gsa_bbw_form_alter(&$form, &$form_state, $form_id) {
+  // Alter the BBW webform
+  if ($nid = _gsa_bbw_load('webform')) {
+    if ($form_id == "webform_client_form_{$nid}") {
+      // Add a submit handler
+      $form['#submit'][] = 'gsa_bbw_webform_submit';
+    }
+  }
+}
+
+/**
+ * Implementation of hook_og_membership_delete().
+ */
+function gsa_bbw_og_membership_delete($og_membership) {
+  
+  global $user;
+  $uid = $user->uid;
+  
+  // Act on membership deletion
+    if ($og_membership->gid == _gsa_bbw_load('group')) {
+      // See if we have a webform to act on
+      if ($webform = _gsa_bbw_load('webform', TRUE)) {
+        // See if we want to delete this user's webform submissions
+        if (variable_get('gsa_bbw_delete_webform', FALSE)) {
+          // Load the file we need from webform
+          module_load_include('inc', 'webform', 'includes/webform.submissions');
+          // Fetch the user's submissions on the webform
+          $submissions = webform_get_submissions(array('nid' => $webform->nid, 'uid' => $uid));
+          // Iterate and delete the submissions
+          foreach ($submissions as $sid => $submission) {
+            webform_submission_delete($webform, $submission);
+          }
+        }
+      }
+    }
+}
+
+/**
+ * Return the BBW group or webform
+ *
+ * @param $type
+ *   Can be 'group' or 'webform'
+ * @param $load
+ *   TRUE to return a fully-loaded node, otherwise the nid will be returned
+ * @return
+ *   See $load
+ */
+function _gsa_bbw_load($type = 'group', $load = FALSE) {
+  static $loaded = array();
+  
+  // Determine the key
+  $key = "gsa_bbw_{$type}";
+  
+  // Fetch the group nid
+  if ($nid = variable_get($key, NULL)) {
+    // See if we want the node loaded
+    if ($load) {
+      // Check the static cache first
+      if (isset($loaded[$key])) {
+        return $loaded[$key];
+      }
+      // Load, cache and return
+      return $loaded[$key] = node_load($nid);
+    }
+    else {
+      // Return just the nid
+      return $nid;
+    }
+  }
+  return NULL;
+}
+
+/**
+ * See if a user has responded to the BBW webform
+ *
+ * @param $user
+ *   Optionally supply a user, or default to the current user
+ * @return
+ *   The webform response ID if responded, otherwise FALSE
+ */
+function gsa_bbw_has_responded($user = NULL) {
+  static $responses = array();
+  
+  // Get current user, if needed
+  if (!$user) {
+    global $user;
+  }
+  
+  // Determine the webform nid
+  if ($nid = _gsa_bbw_load('webform')) {
+    // Check the cache
+    if (!isset($responses[$user->uid])) {
+      $sql = "
+        SELECT sid
+        FROM {webform_submissions}
+        WHERE uid = %d
+        AND nid = %d
+        AND is_draft = 0
+      ";
+      
+      $sid = db_select('webform_submissions')
+        ->fields('webform_submissions', array('sid'))
+        ->condition('uid', $user->uid, '=')
+        ->condition('nid', $nid, '=')
+        ->execute()
+        ->fetchField();
+      
+      $responses[$user->uid] = $sid ? $sid : FALSE;
+    }
+    
+    return $responses[$user->uid];
+  }
+  
+  return FALSE;
+}
+
+/**
+ * Submit handler for the BBW webform
+ */
+function gsa_bbw_webform_submit(&$form, &$form_state) {
+  global $user;
+  
+  // Determine the BBW group nid
+  if ($group = _gsa_bbw_load('group')) {
+    // See if the user is a member yet
+    
+    if (!og_is_member($group)) {
+      // Subscribe them to the group
+      og_save_subscription($group, $user->uid, array('is_active' => 1));
+    }
+  }
+  
+  // Redirect to the group
+  $form_state['redirect'] = "node/{$group}";
+}

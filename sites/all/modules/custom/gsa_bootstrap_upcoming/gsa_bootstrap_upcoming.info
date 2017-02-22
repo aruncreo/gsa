@@ -1,0 +1,6 @@
+name = "GSA Bootstrap Upcoming"
+package = "GSA"
+core = "7.x"
+description = "Applying Bootstrap design for Upcoming Live: In-Person view"
+
+dependencies[] = "views_bootstrap"

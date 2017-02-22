@@ -1,0 +1,35 @@
+Index: og_features.module
+===================================================================
+--- og_features.module	(revision 186)
++++ og_features.module	(working copy)
+@@ -25,6 +25,14 @@
+   $perms['edit all group features'] = array(
+     'title' => t('Edit all group features'),
+   );
++  return $perms;
++}
++
++/**
++ * Implements hook_og_permission().
++ */
++function og_features_og_permission() {
++  $perms = array();
+   $perms['edit own group features'] = array(
+     'title' => t('Edit own group features'),
+   );
+@@ -355,12 +363,9 @@
+     return TRUE;
+   }
+ 
+-  // Check if the user can edit their own group features
+-  if (user_access('edit own group features')) {
+-    // Make sure the user is an admin of this group
+-    if (og_user_access($group->gid, 'administer group')) {
+-      return TRUE;
+-    }
++  // Check if the user can edit their own group features or is a group admin
++  if (og_user_access($group->gid, 'edit own group features') || og_user_access($group->gid, 'administer group')) {
++    return TRUE;
+   }
+   
+   return FALSE;

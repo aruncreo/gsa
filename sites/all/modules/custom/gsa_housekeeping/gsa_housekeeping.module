@@ -1,0 +1,13 @@
+<?php
+
+/**
+ * Impementation of hook_cron().
+ **/
+function gsa_housekeeping_cron() {
+	
+	$queryStr = 'Delete FROM `advancedqueue` WHERE `advancedqueue`.`created` < '. strtotime("-1 week");
+	$result = db_query($queryStr);
+
+}
+
+

@@ -1,0 +1,432 @@
+<?php
+
+/**
+ * Implements hook_menu().
+ */
+function og_wiki_mod_menu() {
+  $items = array();
+  $items['group/%/%/admin/moderate-wiki-revisions'] = array(
+    'title' => 'Moderate wiki Revisions',
+    'description' => 'View wiki nodes with pending revisions inside a given group',
+    'page callback' => 'og_wiki_mod_moderated_revisions_page',
+    'page arguments' => array(1, 2),
+    'access callback' => TRUE,
+    'access arguments' => array(1, 2),
+    'file' => 'og_wiki_mod.pages.inc',
+    'type' => MENU_CALLBACK,
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_gsa_group_page_group_menu_alter().
+ */
+function og_wiki_mod_gsa_group_page_group_menu_alter(&$menu, $group, $node) {
+  
+  $menu['administer']['items']['og_wiki_mod'] = og_wiki_mod_approval_admin_link($group);
+  
+}
+
+/**
+ * Generate a link to moderate comments.
+ */
+function og_wiki_mod_approval_admin_link($group) {
+  global $user;
+  
+  $group_nid = $group->etid;
+  
+  // Check if the current user has moderation permissions or is an admin
+  if (og_user_access($group->gid, 'og_wiki_mod') || og_user_access($group->gid, 'administer group')) {
+    // Make sure the revision moderation feature is enabled
+    if (!og_features_feature_is_disabled('og_wiki_mod', $group)) {
+      // Count the number of moderated comments
+      $nodes = og_wiki_mod_get_moderated_revisions($group);
+      
+      $count = 0;
+
+      foreach ($nodes as $node) {
+       	// Count number of revisions
+       	$count += count($node->revisions);
+      }
+      
+      if ($count) {
+      	// Add a link to moderate the comments
+      	// OG features will remove this, if disabled
+      	return l(t('Moderate Revisions (!count)', array('!count' => $count)), "group/node/{$group_nid}/admin/moderate-wiki-revisions");
+      }
+
+    }
+  }
+}
+
+/**
+ * Implements hook_og_permission().
+ */
+function og_wiki_mod_og_permission() {
+  
+  $perms = array();
+
+  $perms['og_wiki_mod'] = array(
+    'title' => t('Moderate wiki revisions'),
+  );
+
+  $perms['og_wiki_mod_force_revision'] = array(
+    'title' => t('Publish wiki revisions without approval'),
+    'description' => t('Forces new revision for users without this permission.'),
+  );
+
+  return $perms;
+}
+
+/**
+ * Implements hook_og_ui_get_group_admin().
+ */
+function og_wiki_mod_og_ui_get_group_admin() {
+  $items = array();
+  $items['og_wiki_mod'] = array(
+    'title' => t('Moderate Revisions'),
+    'description' => t('Moderate wiki revisions for this group.'),
+    'href' => 'admin/moderate-wiki-revisions',
+  );
+  return $items;
+}
+
+/**
+ * Access handler for the group default roles form
+ */
+function og_wiki_mod_group_settings_form_access($entity_type, $entity_id) {
+  // Load the group
+  if ($group = og_get_group($entity_type, $entity_id)) {
+    // See if this user is a group admin
+    if (og_user_access($group->gid, 'og_wiki_mod') || og_user_access($group->gid, 'administer group')) {
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
+/**
+ * Implements hook_node_presave().
+ */
+function og_wiki_mod_node_presave($node) {
+  global $user;
+  
+  // See if we should skip this node
+  if (_og_wiki_mod_skip_node($node)) {
+    return;
+  }
+  
+  // See if revisioning is turned on
+  if ($node->revision) {
+      // Gather the groups that this node belongs to
+      $groups = array();
+      if (isset($node->{OG_AUDIENCE_FIELD})) {
+        foreach ($node->{OG_AUDIENCE_FIELD}[LANGUAGE_NONE] as $group) {
+          $groups[] = $group['gid'];
+        }
+        $groups = og_load_multiple($groups);
+      }
+    
+      // See if this is in at least one group
+      if (!empty($groups)) {
+        // Make sure this isn't the first revision
+        $count_vid = db_select('node_revision' ,'nr')
+          ->fields('nr', array('vid'))
+          ->condition('nr.nid', $node->nid, '=')
+          ->countQuery()
+          ->execute()
+          ->fetchField();
+        
+        if ($count_vid) {
+          // Iterate the groups
+          foreach ($groups as $group) {
+            // Make sure the revision moderation is turned on within the group
+            if (!og_features_feature_is_disabled('og_wiki_mod', $group)) {
+              // Make sure this user isn't an admin of any of the groups
+              if (!og_user_access($group->gid, 'administer group')) {
+                // See if we should send an alert to the admins
+                if (!og_features_feature_is_disabled('og_wiki_mod_notifications', $group)) {
+                  _og_wiki_mod_send_alerts($group, $node);
+                }
+  
+                // Prevent pathauto updates
+                $node->path['pathauto'] = 0;
+  
+                // Move to the next group
+                continue;
+              }
+            }
+  
+            // Fail out
+            return FALSE;
+          }
+  
+          // Store the current vid of this node, so we can
+          // revert to it in hook_node_update()
+          $node->og_wiki_mod_vid = $node->vid;
+        }
+      }
+    }
+}
+
+/**
+ * Implements hook_node_update().
+ */
+function og_wiki_mod_node_update($node) {
+  // See if we should skip this node
+  if (_og_wiki_mod_skip_node($node)) {
+    return;
+  }
+  
+  // See if there is a vid for this node that we need to revert to
+  if (isset($node->og_wiki_mod_vid)) {
+    // Revert the revision to the prior
+    $revision = node_load($node->nid, $node->og_wiki_mod_vid);
+    $revision->og_wiki_mod_skip = TRUE;
+    node_save($revision);
+      
+    // Send a message to the user about the pending revision
+    drupal_set_message(t('Your revision has been submitted and will be posted once approved.'), 'warning');
+  }
+}
+
+/**
+ * Implements hook_menu_alter()
+ */
+function og_wiki_mod_menu_alter(&$items) {
+  // Hijack the node revisions overview page so we can make changes
+  // if diff.module isn't present, because that turns it into a form
+  // we can alter
+  if (!module_exists('diff')) {
+    $items['node/%node/revisions']['page callback'] = 'og_wiki_mod_node_revision_overview';
+    $items['node/%node/revisions']['file'] = 'og_wiki_mod.pages.inc';
+    $items['node/%node/revisions']['module'] = 'og_wiki_mod';
+  }
+}
+
+/**
+ * Implements hook_mail()
+ */
+function og_wiki_mod_mail($key, &$message, $params) {
+  switch ($key) {
+    case 'new_revision':
+      // Extract params
+      $account = $params['account'];
+      $node = $params['node'];
+      $group = $params['group'];
+      // Set the subject
+      $message['subject'] = t('There is a new wiki revision pending approval in your group');
+      // Set the body
+      $message['body'] = array();
+      $message['body'][] = t('A revision was submitted in the group "!group" for the wiki "!node." The revision is awaiting administrative approval.', array('!group' => check_plain($group->label), '!node' => check_plain($node->title)));
+      $message['body'][] = t('View the pending revisions in the group: !link', array('!link' => url("group/node/{$group->gid}/admin/moderate-wiki-revisions", array('absolute' => TRUE))));
+      break;
+  }
+}
+
+/**
+ * Implements hook_form_diff_node_revisions_alter().
+ */
+function og_wiki_mod_form_diff_node_revisions_alter(&$form, &$form_state) {
+  // Change the button text to be more friendly
+  $form['submit']['#value'] = t('Show changes');
+   
+  // Semi-nasty way of changing the "revert" text in the links to
+  // something more friendly
+  foreach ($form['operations'] as $nid => $row) {
+    if (isset($form['operations'][$nid][0])) {
+      $form['operations'][$nid][0] = str_replace('>Revert<', '>' . t('Publish') . '<', $form['operations'][$nid][0]);
+    }
+  }
+}
+
+/**
+ * Implements hook_form_node_revision_revert_confirm_alter().
+ */
+function og_wiki_mod_form_node_revision_revert_confirm_alter(&$form, &$form_state) {
+  // Override the title to change the word "revert" to "publish"
+  drupal_set_title(t('Are you sure you want to publish the revision from !date?', array('!date' => format_date($form['#node_revision']->revision_timestamp))));
+  // Change the button to "publish"
+  $form['actions']['submit']['#value'] = t('Publish');
+}
+
+/**
+ * Implements hook_og_features_registry()
+ */
+function og_wiki_mod_og_features_registry() {
+  $registry = array();
+  
+  // Feature: og_wiki_mod
+  $feature = new stdClass;
+  $feature->id = 'og_wiki_mod';
+  $feature->name = t('Moderate wiki revisions');
+  $feature->description = t('Prevent wiki revisions from being published until a group admin approves them.');
+  $feature->components = array(
+    'path' => array(
+      'group/%/%/moderate-wiki-revisions',
+    ),
+  );
+  $registry[$feature->id] = $feature;
+  
+  // Feature: og_wiki_mod_notifications
+  $feature = new stdClass;
+  $feature->id = 'og_wiki_mod_notifications';
+  $feature->name = t('Moderate wiki revisions notifications');
+  $feature->description = t('If checked, a notification will be sent to the group admins when a new wiki revision requiring approval is submitted.');
+  $feature->components = array();
+  $registry[$feature->id] = $feature;
+  
+  return $registry;
+}
+
+/**
+ * Get the wiki nodes from a group containing moderated revisions
+ *
+ * @param $group
+ *   The group entity
+ * @return
+ *   An array of limited node objects
+ */
+function og_wiki_mod_get_moderated_revisions($group) {
+  static $nodes = array();
+  
+  // See if the cache hasn't been populated yet for this group
+  if (!isset($nodes[$group->gid])) {
+    $nodes[$group->gid] = array();
+    
+    // Fetch all wiki nodes inside this group, along with their revisions
+    $query = db_select('node', 'n');
+    $query->leftJoin('users', 'u', 'u.uid = n.uid');
+    $query->leftJoin('node_revision', 'nr', 'nr.nid = n.nid');
+    $query->leftJoin('og_membership', 'og', 'og.etid = n.nid');
+    $query->fields('n', array('nid', 'title', 'uid'));
+    $query->addField('n', 'vid', 'version');
+    $query->fields('nr', array('vid'));
+    $query->fields('u', array('name'));
+    $query->condition('n.type', 'wiki');
+    $query->condition('og.entity_type', 'node');
+    $query->condition('og.gid', $group->gid);
+    
+    // Execute the query
+    $results = $query->execute();
+  
+    foreach ($results as $node) {
+      $nodes[$group->gid][$node->nid]->nid = $node->nid;
+      $nodes[$group->gid][$node->nid]->uid = $node->uid;
+      $nodes[$group->gid][$node->nid]->name = $node->name;
+      $nodes[$group->gid][$node->nid]->title = $node->title;
+      $nodes[$group->gid][$node->nid]->version = $node->version;
+      $nodes[$group->gid][$node->nid]->revisions[$node->vid] = $node->vid;
+    }
+  
+    // Determine which nodes contain moderated revisions
+    foreach ($nodes[$group->gid] as $nid => $node) {
+      $moderated = FALSE;
+      // One-revision nodes do not contain moderated revisions
+      if (!(count($node->revisions) < 2)) {
+        // Iterate the revisions to see if the current revision is not
+        // the highest
+        foreach ($node->revisions as $vid) {
+          if ($node->version < $vid) {
+            $moderated = TRUE;
+            break;
+          }
+        }
+      }
+      // Remove unmoderated
+      if (!$moderated) {
+        unset($nodes[$group->gid][$nid]);
+      }
+    }
+  }
+  
+  return $nodes[$group->gid];
+}
+
+/**
+ * Send admin alerts about a new revision
+ */
+function _og_wiki_mod_send_alerts($group, $node) {
+  $accounts = array();
+  
+  // Get the group owner
+  if ($owner = $group->user()) {
+    $accounts[$owner->uid] = $owner;
+  }
+  
+  // Get group admins
+  $uids = array();
+  $roles = og_roles();
+  $rid = array_search(OG_ADMINISTRATOR_ROLE, $roles);
+  $results = og_get_users_by_roles($group->gid, array($rid));
+  foreach ($results as $result) {
+    // Avoid duplicate users
+    if (isset($owner->uid)) {
+      if ($result->uid == $owner->uid) {
+        continue;
+      }
+    }
+    $uids[] = $result->uid;
+  }
+  
+  // Load and append the admins
+  if ($uids) {
+    if ($admins = user_load_multiple($uids)) {
+      $accounts += $admins;
+    }
+  }
+  
+  // Send the alerts
+  foreach ($accounts as $account) {
+    drupal_mail(
+      'og_wiki_mod',
+      'new_revision',
+      $account->mail,
+      user_preferred_language($account),
+      array(
+        'account' => $account,
+        'group' => $group,
+        'node' => $node,
+      )
+    );
+  }
+}
+
+/**
+ * Helper function to indicate when we should skip processing on a node
+ *  
+ * This is used because node_save() is called within hook_node_update()
+ * to revert revisions back to the original. 
+ */
+function _og_wiki_mod_skip_node($node) {
+  if ($node->type != 'wiki' || (isset($node->og_wiki_mod_skip) && $node->og_wiki_mod_skip)) {
+    return TRUE;
+  }
+  return FALSE;
+}
+
+/**
+ * Implements hook_form_alter()
+ *
+ * Forces a new revision on wiki content type for all users without this permission
+ */
+function og_wiki_mod_form_alter(&$form, &$form_state, $form_id) {
+
+  if (arg(0) == 'node' && is_numeric(arg(1))) $nid = arg(1);
+  $node = node_load($nid);
+  $group = $node->{OG_AUDIENCE_FIELD}[LANGUAGE_NONE][0];
+  $gid = $group['gid'];
+
+  if (!og_user_access($gid, 'og_wiki_mod_force_revision')) {
+
+    if ($form['#id'] == 'wiki-node-form') {
+      
+      $form['revision_information']['revision'] = array(
+          '#type' => 'checkbox',
+          '#title' => 'Create new revision',
+          '#default_value' => '1',
+          '#access' => '1',
+      );
+    }
+  }
+}

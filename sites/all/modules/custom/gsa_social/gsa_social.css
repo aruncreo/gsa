@@ -1,0 +1,126 @@
+@CHARSET "UTF-8";
+
+.gsa-social-share-links .item-list ul li {
+  list-style-type: none;
+  display: inline-block;
+  width: auto;
+  height: 22px; 
+  margin: 0 5px 0 0 !important;
+  padding: 0 !important;
+}
+
+.gsa-social-share-links .item-list ul {
+  margin: 0 !important;
+  padding: 0;
+}
+
+.gsa-social-share-links .item-list .fb-like {
+  width: 45px;
+  overflow: hidden;
+}
+
+.gsa-social-share-links .item-list li.gsa-social-li-fb {
+  width: 45px;
+  overflow: hidden;
+}
+
+.gsa-social-share-links .item-list li.gsa-social-li-gp {
+  width: 32px;
+  overflow: hidden;
+}
+
+.gsa-social-share-links .item-list li.gsa-social-li-tweet {
+  width: 60px;
+  overflow: hidden;
+}
+
+.gsa-social-share-links .item-list li.gsa-social-li-ln {
+  width: 61px;
+  overflow: hidden;
+}
+
+.gsa-social-share-links .item-list li.gsa-social-li-ymw {
+  width: 40px;
+  overflow: hidden;
+}
+
+.gsa-social-share-links .item-list li.gsa-social-li-stumbleupon {
+  width: 75px;
+  overflow: hidden;
+}
+
+.gsa-social-share-links .item-list li.gsa-social-li-digg {
+  width: 50px;
+  overflow: hidden;
+}
+
+.gsa-social-share-links .item-list li.gsa-social-li-digg .db-count {
+  display: none;
+}
+
+.gsa-social-share-links .item-list li.gsa-social-li-digg .db-copy {
+  display: none;
+}
+
+.gsa-social-share-links .item-list li.gsa-social-li-digg .db-compact .db-anchor {
+  width: 50px !important;
+}
+
+.gsa-social-share-links .item-list li.gsa-social-li-pinterest {
+  width: 43px;
+  overflow: hidden;
+}
+  
+.gsa-social-share-links .item-list li.gsa-social-li-delicious {
+  width: 12px;
+  overflow: hidden;
+}
+
+.gsa-social-share-links .item-list li.gsa-social-li-newsvine {
+  width: 18px;
+  overflow: hidden;
+}
+  
+.gsa-social-share-links .item-list li.gsa-social-li-technorati {
+  width: 80px;
+  overflow: hidden;
+}
+
+.gsa-social-share-links-wrapper {
+  display: none;
+}
+
+.gsa-social-share-links {
+  margin: 0;
+}
+
+.social-page .contextual-links-wrapper {
+  display: none;
+}
+
+.views-field-sharethis {
+  display: none;
+}
+
+.sharethis-wrapper {
+  width: 120px;
+  margin: 20px;
+  float: left;
+}
+
+.sharethis-wrapper > span {
+  display: inline-block;
+  float: left;
+  width: 40px;
+  height: 40px;
+}
+/**
+ * To align the share link in individual post
+ */
+.post-sharethis{
+margin-left:0 !important;
+}
+
+.post-sharethis li{
+list-style:none !important;
+}

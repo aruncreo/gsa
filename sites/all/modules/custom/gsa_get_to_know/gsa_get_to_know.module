@@ -1,0 +1,89 @@
+<?php
+
+/**
+ * Implementation of hook_init().
+ */
+function gsa_get_to_know_init() {
+
+}
+
+
+/**
+ * Implementation of hook_menu().
+ */
+function gsa_get_to_know_menu() {
+  $items = array();
+  
+  
+  return $items;
+}
+
+
+
+/**
+ * Implementation of hook_block_info()
+ */
+function gsa_get_to_know_block_info() {
+  $blocks['gettoknow']['info'] = t('Get To Know');
+  return $blocks;
+}
+
+
+/**
+ * Implementation of hook_block_view()
+ */
+function gsa_get_to_know_block_view($delta = '') {
+  switch ($delta) {
+    case 'gettoknow':
+      drupal_add_css(drupal_get_path('module', 'gsa_get_to_know') . '/gsa_get_to_know.css');
+      $block['subject'] = t('Get To Know');
+      $block['content'] = _get_to_know_block();
+      break;
+  }
+  return $block;
+}
+
+
+function _get_to_know_block() {
+  global $user, $language;
+  $user_ids = array();
+  $my_nodes = node_load_multiple(array(), array('uid' => $user->uid));
+  foreach ($my_nodes AS $nid => $node) {
+    
+    if (function_exists('dlike_get_users')) {
+      $like_content_user_ids = dlike_get_users('node', $node->nid);
+    }
+    if ($like_content_user_ids) {
+      foreach ($like_content_user_ids AS $uid) {
+        $user_ids[$uid] = isset($user_ids[$uid]) ? $user_ids[$uid] : 0;
+        $user_ids[$uid] += 10;
+      }
+    }
+    
+    if (function_exists('gsa_clike_list_comment_users')) {
+      $like_comment_user_ids = gsa_clike_list_comment_users($node);
+    }
+    if ($like_comment_user_ids) {
+      foreach ($like_comment_user_ids AS $uid => $count) {
+        $user_ids[$uid] = isset($user_ids[$uid]) ? $user_ids[$uid] : 0;
+        $user_ids[$uid] += $count;
+      }
+    }
+  }
+  arsort($user_ids);
+
+  $counter = 1;
+  foreach ($user_ids AS $uid => $weight) {
+    if ($uid == $user->uid || $uid == 0) continue;
+    if ($account = user_load($uid)) {
+      $name = $account->profile_name .' '. $account->profile_last_name;
+      
+      $rows[] = '<img src="'. image_style_url('user_picture_meta', $account->picture->uri) . '" > ' .  l($name, 'user/'. $account->uid);
+      if (++$counter > 4) break;
+    }
+  }
+  
+  if (count($rows)) {
+    return "<div id='gsa-get-to-know-block-content'>". theme('item_list', array('items' => $rows)) .'</div>';
+  }
+}

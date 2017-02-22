@@ -1,0 +1,263 @@
+<?php
+/**
+* @file
+* Provide a custom field to render youtube video in gallery format in entity types
+*/
+
+/**
+ * Implements hook_menu().
+ */
+function gsa_youtube_menu() {
+	$items = array();
+	
+	$items['youtube-video/help'] = array(
+      'title' => t('Video Tips'),
+      'description' => 'YouTube Video Compose Tips',
+      'page callback' => 'gsa_youtube_help_text',
+      'access callback' => true,
+      'type' => MENU_NORMAL_ITEM,
+    );
+    
+    return $items;
+}
+
+function gsa_youtube_help_text(){
+	
+	return "<h2>YouTube Videos</h2><ul class='tips'><li style='list-style:none;' id='filter-filter_html_escape'>To post a video to Interact, the content creator will first need to make sure the video is posted on GSA's video platform, YouTube. Once the video is posted to YouTube, a representation from GSA's Office of Communications and Marketing (OCM) will provide a YouTube Share URL.<br/><br/>
+The YouTube Share URL should then be placed in the designated field on the video form. Please note when posting multiple videos, there will be a separate YouTube Share URL for each video.<br/><br/>
+</li></ul>";
+}
+
+/**
+* Implements hook_field_info().
+*/
+function gsa_youtube_field_info() {
+  return array(
+    'gsa_youtube_video_field' => array(
+      'label' => t('YouTube Video'),
+      'description' => t('Provide a way to display youtube video as a field'),
+      'default_widget' => 'gsa_youtube_embed_code_list',
+      'default_formatter' => 'gsa_youtube_embed_code_formatter',
+    ),
+  );
+}
+
+/**
+* Implements hook_field_is_empty().
+* 
+* @param $item
+*   An item that may or may not be empty.
+* @param $field
+*   The field to which $item belongs.
+* 
+* @return
+*   TRUE if $field's type considers $item not to contain any data; FALSE otherwise.
+*/
+function gsa_youtube_field_is_empty($item, $field) {
+  return empty($item['embed_code']);
+}
+
+/**
+* Implements hook_field_formatter_info().
+*/
+function gsa_youtube_field_formatter_info() {
+  return array(
+    'gsa_youtube_embed_code_formatter' => array(
+      'label' => t('YouTube Video Gallery'),
+      'field types' => array('gsa_youtube_video_field'),
+    ),
+  );
+}
+
+/**
+* Implements hook_field_formatter_view().
+* 
+* @param $entity_type
+*   The type of $entity.
+* @param $entity
+*   The entity being displayed.
+* @param $field
+*   The field structure.
+* @param $instance
+*   The field instance.
+* @param $langcode
+*   The language associated with $items.
+* @param $items
+*   Array of values for this field.
+* @param $display
+*   The display settings to use.
+* 
+* @return
+*   A renderable array for the $items, as an array of child elements keyed by numeric indexes starting from 0.
+*/
+function gsa_youtube_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  $element = array();
+
+  switch ($display['type']) {
+    case 'gsa_youtube_embed_code_formatter':
+      $youtube_data['youtube_data']=$items;
+      $output = theme('gsa_youtube_video_gallery', $youtube_data);
+      $element[0] = array('#markup' => $output);
+    break;  
+  }
+
+  return $element;
+}
+
+
+/**
+* Implements hook_widget_info().
+*/
+function gsa_youtube_field_widget_info() {
+  return array(
+    'gsa_youtube_embed_code_list' => array(
+      'label' => t('Embed Code List'),
+      'field types' => array('gsa_youtube_video_field'),
+    ),
+  );
+}
+
+/**
+* Implements hook_field_widget_form().
+* 
+* @param $form
+*   The form structure where widgets are being attached to.
+* @param $form_state
+*   An associative array containing the current state of the form.
+* @param $field
+*   The field structure.
+* @param $instance
+*   The field instance.
+* @param $langcode
+*   The language associated with $items.
+* @param $items
+*   Array of default values for this field.
+* @param $delta
+*   The order of this item in the array of subelements (0, 1, 2, etc).
+* @param $element
+*   A form element array containing basic properties for the widget.
+* 
+* @return
+*   The form elements for a single widget for this field.
+*/
+function gsa_youtube_field_widget_form(&$form, &$form_state, $field, $instance, $langcode, $items, $delta, $element) {
+  $embed_code_value = isset($items[$delta]['embed_code']) ? $items[$delta]['embed_code'] : '';
+  $video_des_value = isset($items[$delta]['video_des']) ? $items[$delta]['video_des'] : '';
+
+  $element['#delta'] = $delta;
+
+  switch ($instance['widget']['type']) {
+    case 'gsa_youtube_embed_code_list':    	
+      if($embed_code_value != ''){ $embed_code_value = 'http://youtu.be/'.$embed_code_value;}
+      $element['embed_code'] = array(
+        '#type' => 'textfield',
+        '#default_value' => $embed_code_value,
+        '#size' => 40,
+        '#maxlength' => 40,
+        '#description' => t('Enter the YouTube Share URL')
+      );
+      
+      $element['video_title'] = array(
+	    '#value' => '',
+		'#type' => 'hidden',
+	  );
+	  $element['thumb_url'] = array(
+		'#value' => '',
+		'#type' => 'hidden',
+	  );
+	  
+	   $element['video_des'] = array(
+  		'#type' => 'textarea',
+  		'#description' => t('Enter a description for the YouTube video (255 character limit).'),
+  		'#default_value' => $video_des_value,
+  		'#rows' => 5,
+  		'#cols' => 10,
+  		'#resizable' => TRUE,
+	  );
+	
+	
+      break;
+    
+  }
+
+  return $element;
+}
+
+/**
+* Implements hook_theme().
+*/
+function gsa_youtube_theme() {
+  return array(
+    'gsa_youtube_video_gallery'  => array(
+      'render element' => 'element',
+      'template' => 'gsa_youtube_video_gallery',
+    ),
+  );
+}
+
+function template_preprocess_gsa_youtube_video_gallery(&$vars) { 
+  $vars['first_embed_code']=$vars['youtube_data'][0]['embed_code'];
+  $vars['first_video_des']=$vars['youtube_data'][0]['video_des'];
+  $vars['width']='640';
+  $vars['height']='360';
+  $vars['player_id'] = drupal_html_id('youtubeplayer-' . $vars['first_embed_code'] . '-' . 'test');
+  $settings = array(
+    'youtubeSharedPlayer' => array(
+      $vars['player_id'],
+    ),
+  );
+
+  drupal_add_js($settings, array('type' => 'setting'));
+
+}
+
+
+/**
+* Implements hook_node_presave().
+* 
+* @param undefined $node
+*    The node object to be inserted or updated
+*/
+function gsa_youtube_node_presave($node) {
+  if(isset($node->field_youtube_video[$node->language])){
+  	foreach($node->field_youtube_video[$node->language] as &$youtube_field){
+  	  if($youtube_field['embed_code'] != ''){
+  	  	$youtube_field['embed_code'] = substr($youtube_field['embed_code'],16);
+		//removes double forward slashes
+		$illegal_char = array('/');
+		$youtube_field['embed_code'] = str_replace($illegal_char , "", $youtube_field['embed_code']);
+  	    $thumbnail_url='https://img.youtube.com/vi/'.$youtube_field['embed_code'].'/1.jpg';
+  	    $youtube_field['thumb_url'] = $thumbnail_url; 
+	  }
+    }
+  }
+}
+
+/**
+* Implements hook_og_user_access_alter().
+*/
+function gsa_youtube_og_user_access_alter(&$perm, $context) {
+  if (empty($perm['view field_youtube_video field'])) {
+    $perm['view field_youtube_video field'] = TRUE;
+  }
+}
+
+/**
+* Implements hook_field_validate
+*/
+function gsa_youtube_field_validate($entity_type, $entity, $field, $instance, $langcode, $items, &$errors) {
+  foreach ($items as $delta => $item) {
+    if(!empty($item['video_des']) && drupal_strlen($item['video_des']) > 255) {
+	  $errors[$field['field_name']][$langcode][$delta][] = array(
+          'error' => 'text_max_length',
+          'message' => t('Video Description can not be longer than 255 character'),
+        );	
+    }
+  }
+}
+
+function gsa_youtube_form_alter(&$form, &$form_state, $form_id) {
+	if(isset($form['field_youtube_video'])){
+		$form['field_youtube_video']['und']['#description'] = '<div class="filter-help form-wrapper" ><p>'.$form['field_youtube_video']['und']['#description'].'</p></div>';
+	}
+}

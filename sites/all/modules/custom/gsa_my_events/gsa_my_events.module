@@ -1,0 +1,14 @@
+<?php
+
+include_once 'gsa_my_events.features.inc';
+
+
+
+/**
+ * Implementation of hook_init().
+ */
+function gsa_my_events_init() {
+  $module_path = drupal_get_path('module', 'gsa_my_events');
+  drupal_add_css($module_path .'/gsa_my_events.css');
+}
+

@@ -1,0 +1,5 @@
+name = Interact Miscellaneous
+description = This module holds miscellaneous code for Interact.
+package = Interact
+core = 7.x
+project = "interact_misc"

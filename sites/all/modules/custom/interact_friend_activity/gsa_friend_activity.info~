@@ -1,0 +1,6 @@
+name = "GSA Friend Activity"
+package = "GSA"
+description = "Provide an alternate heartbeat stream excluding user's own activity" (has dependencies)
+core = 7.x
+version = 7.x-1.0
+files[] = streams/gsarelationsactivity.inc

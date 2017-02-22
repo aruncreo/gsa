@@ -1,0 +1,10 @@
+<?php
+
+/**
+ * Implements hook_ctools_plugin_api().
+ */
+function gsa_friend_activity_ctools_plugin_api($owner, $api) {
+  if (($owner == 'heartbeat' && $api == 'heartbeat') || ($owner == 'ds' && $api == 'ds') || ($owner == 'ds_extras' && $api == 'ds_extras')) {
+    return array('version' => 1);
+  }
+}

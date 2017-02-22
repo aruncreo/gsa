@@ -1,0 +1,160 @@
+<?php
+
+/**
+ * Implements of hook_schema().
+ */
+function gsa_event_schema() {
+  $schema = array();
+  
+  $schema['gsa_events'] = array(
+    'description' => 'A table listing all available events from SFDC.',
+    'fields' => array(
+      'sfid' => array(
+        'type' => 'varchar', 
+        'length' => 255, 
+        'not null' => TRUE, 
+        'description' => 'The Salesforce object ID associated with the user.'
+      ),
+      'nid' => array(
+        'type' => 'int', 
+        'unsigned' => TRUE, 
+        'not null' => TRUE, 
+        'default' => 0, 
+        'description' => 'The node ID which this event maps to.',
+      ),
+      'data' => array(
+        'type' => 'blob', 
+        'size' => 'big', 
+        'not null' => TRUE, 
+        'serialize' => TRUE, 
+        'object default' => array(),
+      ),
+    ),
+    'primary key' => array('sfid'),
+  );
+  
+  $schema['gsa_event_user_input'] = array(
+    'description' => 'A table listing the latest event registration form input for each user',
+    'fields' => array(
+      'uid' => array(
+        'type' => 'int', 
+        'unsigned' => TRUE, 
+        'not null' => TRUE, 
+        'default' => 0, 
+        'description' => 'The user ID.',
+      ),
+      'data' => array(
+        'type' => 'blob', 
+        'size' => 'big', 
+        'not null' => TRUE, 
+        'serialize' => TRUE, 
+        'object default' => array(), 
+        'description' => 'The form data entered by the user on event registration forms',
+      ),
+    ),
+    'primary key' => array('uid'),
+  );
+
+  return $schema;
+}
+
+/**
+ * Implements of hook_install()
+ */
+function gsa_event_install() {
+  gsa_event_set_weight();
+  drupal_set_message(t('Please visit the !link to perform the initial syncronization between Drupal and Salesforce, as well as set the required settings.', array('!link' => l('configuration page', 'admin/config/gsa_salesforce'))), 'warning');
+}
+
+/**
+ * Implements of hook_uninstall()
+ */
+function gsa_event_uninstall() {
+  // Delete variables
+  variable_del('gsa_event_last_sync');
+  variable_del('gsa_events_sync_interval');
+  variable_del('gsa_event_allow_registration');
+  variable_del('gsa_event_hour_offset');
+  variable_del('gsa_event_waitlist');
+  variable_del('gsa_event_email_capacity_to');
+  variable_del('gsa_event_email_capacity_subject');
+  variable_del('gsa_event_email_capacity_body');
+  variable_del('gsa_event_notification_capacity_register_button');
+  variable_del('gsa_event_notification_capacity_warning');
+  variable_del('gsa_event_notification_capacity_confirmation_message');
+  variable_del('gsa_event_threshold');
+}
+
+/**
+ * Set the weight of this module above Views
+ */
+function gsa_event_set_weight() {
+  $weight = db_select('system')
+    ->fields('system', array('weight'))
+    ->condition('name', 'views')
+    ->execute()
+    ->fetchField();
+  
+  db_update('system')
+    ->fields(array(
+      'weight' => $weight + 1
+    ))
+    ->condition('name', 'gsa_event')
+    ->execute();
+}
+
+function gsa_event_update_6001() {
+  gsa_event_set_weight();
+  return array();
+}
+
+/**
+ * Update 6002: Enabling modules geocoder, geofield, geophp, leaflet, leaflet_mapbox, leaflet_views
+ */
+function gsa_event_update_6002() {
+  $modules = array('geocoder','geofield','geophp','leaflet','leaflet_mapbox','leaflet_views'); // Array of module names
+  $enable_dependencies = TRUE; // Whether or not to enable dependant modules
+  module_enable($modules, $enable_dependencies);
+}
+
+/**
+ * Update 6003: Enable gsa_map_title module
+ */
+function gsa_event_update_6003() {
+  $modules = array('gsa_map_title'); // Array of module names
+  $enable_dependencies = TRUE; // Whether or not to enable dependant modules
+  module_enable($modules, $enable_dependencies);
+}
+
+
+/**
+* Update 6004: Changing the link of training menu in main-menu
+*/
+function gsa_event_update_6004() {
+	db_update('menu_links') 
+ 	->fields(array(
+    'link_path' => 'gsa-training-home',
+	'link_title' => 'EDUCATION',
+ 	))
+ 	->condition('mlid',13834)
+ 	->execute();
+}
+
+/**
+* Update 6005: Deleteing node tabs for video
+*/
+function gsa_event_update_6005() {
+	$or=db_or()->condition('nid', 2036)->condition('nid', 2402);
+	db_delete('node_menutabs') 
+  ->condition($or)
+  ->execute();
+}
+
+/**
+* Update 6006: Deleteing Archive field from gsa_event content type
+*/
+function gsa_event_update_6006() {
+  if ($instance = field_info_instance('node', 'field_archive', 'gsa_event')) {
+    field_delete_instance($instance);
+  }
+}

@@ -1,0 +1,7 @@
+name = GSA Tokens support
+core = "7.x"
+description = "Provides Tokens support for GSA modules."
+dependencies[] = token
+dependencies[] = og
+dependencies[] = og_features
+package = "GSA"

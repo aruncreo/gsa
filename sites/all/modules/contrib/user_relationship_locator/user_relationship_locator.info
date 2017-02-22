@@ -1,0 +1,13 @@
+name = User Relationship Locator
+description = "Provides a listing of people you may know." 
+dependencies[] = user_relationships
+dependencies[] = user_relationships_ui
+package = User Relationships
+core = 7.x
+
+; Information added by drupal.org packaging script on 2012-05-07
+version = "7.x-1.0-alpha4"
+core = "7.x"
+project = "user_relationship_locator"
+datestamp = "1336409787"
+

@@ -1,0 +1,6 @@
+name = Interact UI Support
+description = Helper functions for the UI.
+package = @custom
+version = "7.x-1.x-dev"
+core = "7.x"
+

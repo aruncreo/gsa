@@ -1,0 +1,21 @@
+name = Interact Subscriptions
+description = Subscriptions side bar for interact
+package = Interact
+core = 7.x
+project = "interact_Subscriptions"
+php = 5.2.4
+dependencies[] = entity
+dependencies[] = features
+dependencies[] = heartbeat_rules
+dependencies[] = message_subscribe
+dependencies[] = views
+features[ctools][] = views:views_default:3.0
+features[features_api][] = api:1
+features[flag][] = gsa_subscribe_node
+features[views_view][] = gsa_my_content_notifications
+features[views_view][] = gsa_my_subscription_events
+features[views_view][] = gsa_subscribe_node
+features_exclude[dependencies][ctools] = ctools
+features_exclude[dependencies][flag] = flag
+project path = sites/all/modules/custom
+

@@ -1,0 +1,22 @@
+#gsa-friend-activity-block-content ul li::before {
+  content: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+#gsa-friend-activity-block-content ul li {
+  margin: 0 0 10px!important;
+  line-height: 100%;
+}
+
+#homebox-add {
+  clear: both;
+  float: left;
+  width: 100%;
+}
+
+#homebox-add ul li::before {
+  content: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}

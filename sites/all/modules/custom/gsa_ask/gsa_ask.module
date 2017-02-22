@@ -1,0 +1,130 @@
+<?php
+
+include_once('gsa_ask.features.inc');
+
+/**
+ * Implementation of hook_init()
+ */
+function gsa_ask_init() {
+  $module_path = drupal_get_path('module', 'gsa_ask');
+  drupal_add_css($module_path .'css/gsa_ask.css');
+}
+
+/**
+ * Implements hook_menu().
+ */
+function gsa_ask_menu() {
+}
+
+/**
+ * Implements hook_block_info().
+ */
+function gsa_ask_block_info() {
+  // Create block for ask question.
+  $blocks['gsa_ask'] = array(
+      'info' => t('GSA Ask Question'),
+  );
+  return $blocks;
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function gsa_ask_block_view($delta = '') {
+  global $user;
+  $block = array();
+
+  //The $delta parameter tells us which block is being requested.
+  switch ($delta) {
+    case 'gsa_ask':
+      global $user;
+      $block['subject'] = t('Ask');
+      $form = gsa_ask_question($user->uid);
+      $block['content'] = render($form);
+      break;
+  }
+  return $block;
+}
+
+/**
+ * Function to return form for question.
+ * @param $uid
+ * @return Ambigous <The, boolean, string>
+ */
+function gsa_ask_question($uid){
+  return drupal_get_form('gsa_ask_form');
+}
+
+/**
+ * Function to callback form.
+ * hook_form ()
+ * @param unknown_type $form
+ * @param unknown_type $form_state
+ * @return multitype:string Ambigous <The, string, A, Optional>
+ */
+function gsa_ask_form($form, &$form_state) {
+  global $user;
+
+  $form['title'] = array(
+      '#title' => '',
+      '#type' => 'textarea',
+      '#description' => t('Ask your question to the community.<br>(Max. 255 char.)'),
+      '#attributes' => array('onKeyPress'=>"return(this.value.length<255);"),
+  );
+  
+  $form['submit'] = array(
+      '#type' => 'submit',
+      '#value' => t('Submit'),
+  );
+  
+  if ($user->uid) {
+    $form['view-my-questions'] = array(
+        '#prefix' => '<div class="links">',
+        '#markup' => l(t('My questions'), "user/{$user->uid}/questions", array('attributes' => array('class' => 'view-my-faq'))),
+    );
+  }
+  
+  $form['view-all-questions'] = array(
+      '#markup' => l(t('View all questions'), 'questions', array('attributes' => array('class' => 'view-all-faq'))),
+      '#suffix' => '</div>',
+  );
+  
+  return $form;
+}
+
+/**
+ * hook_validate();
+ * @param unknown_type $form
+ * @param unknown_type $form_state
+ */
+function gsa_ask_form_validate($form, &$form_state) {
+  // Validation logic.
+  if (empty($form_state['values']['title'])) {
+    form_set_error('title', t('Question box should not be empty.'));
+  }
+}
+
+/**
+ * Function callback to submit. hook_submit()
+ * @param unknown_type $form
+ * @param unknown_type $form_state
+ */
+function gsa_ask_form_submit($form, &$form_state) {
+  // Submission logic.
+  global $user,$language;
+  $node = (object) $node;
+  $node->uid = $user->uid;
+  $node->name = $user->name;
+  $node->type = 'faq';
+  $node->created = time();
+  $node->status = 1;
+  $node->comment = 2;
+  $node->title = $form_state['input']['title'];
+  $node->op = 'save';
+  $node->promote = '0';
+  $node->is_new = '1';
+  $node->language = $language->language;
+  $node->timestamp = time();
+  node_save($node);
+  drupal_set_message('Your question has been successfully posted to us. We will get back to you shortly.');
+}

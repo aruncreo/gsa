@@ -1,0 +1,5 @@
+name = "OG Role-Based Messages"
+description = "Provide unique messages to group members, nonmembers, and anoymous users."
+core = 7.x
+dependencies[] = og
+dependencies[] = og_features

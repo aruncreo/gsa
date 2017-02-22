@@ -1,0 +1,49 @@
+<?php
+/**
+ * @file
+ * Code for the GSA members page feature.
+ */
+
+include_once 'gsa_members_page.features.inc';
+
+/**
+ * Implementation of hook_views_pre_render().
+ */
+function gsa_members_page_views_pre_render(&$view) {
+  if ($view->name == 'members') {
+
+    module_load_include('inc', 'gsa_salesforce', 'includes/gsa_salesforce.locations');
+    $locations = gsa_salesforce_get_locations();
+
+    foreach ($view->result as $key => $row) {
+
+      // Suppress first/last name if it closely matches the username
+      if (isset($row->profile_value_profile_name_value) && isset($row->profile_value_profile_last_name_value)) {
+        $cleanUsername = preg_replace('/[-_\. ]/', '', $row->users_name);
+        $profileName = trim($row->profile_value_profile_name_value) . trim($row->profile_value_profile_last_name_value);
+        if (strtolower($cleanUsername) == strtolower($profileName)) {
+          $row->profile_value_profile_name_value = '';
+          $row->profile_value_profile_last_name_value = '';
+        }
+      }
+      
+      // Expand the state abbreviation
+      if (isset($row->profile_value_profile_location_value) && $row->profile_value_profile_location_value != '') {
+        if (array_key_exists($row->profile_value_profile_location_value, $locations)) {
+          $row->profile_value_profile_location_value = $locations[$row->profile_value_profile_location_value]['name'];
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Implementation of hook_form_FORM_ID_alter().
+ */
+function gsa_members_page_form_views_exposed_form_alter(&$form, &$form_state) {
+  // Add state abbreviations to the exposed filter widget
+  if ($form['#id'] == 'views-exposed-form-members-page') {
+    module_load_include('inc', 'gsa_salesforce', 'includes/gsa_salesforce.locations');
+    $form['location']['#options'] = $form['location']['#options'] + gsa_salesforce_locations_options();
+  }
+} 

@@ -1,0 +1,9 @@
+.gsa_pcp-percent-bar-wrapper {
+  width: 100%;
+  border: 1px solid #000;
+  padding: 1px;
+}
+.gsa_pcp-percent-bar {
+  height: 10px;
+  background-color: #777;
+}

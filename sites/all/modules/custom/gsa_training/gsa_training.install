@@ -1,0 +1,72 @@
+<?php
+
+/**
+ * Implements of hook_schema().
+ */
+function gsa_training_schema() {
+  $schema = array();
+  $schema['gsa_training_results'] = array(
+    'description' => 'A table storing GSA training results for users.',
+    'fields' => array(
+      'uid' => array(
+        'type' => 'varchar', 
+        'length' => 255, 
+        'not null' => TRUE, 
+        'description' => 'The user ID.',
+      ),
+      'wid' => array(
+        'type' => 'int', 
+        'unsigned' => TRUE, 
+        'not null' => TRUE, 
+        'default' => 0, 
+        'description' => 'The webinar ID.',
+      ),
+      'usfid' => array(
+        'type' => 'varchar', 
+        'length' => 255, 
+        'not null' => FALSE, 
+        'default' => 0, 
+        'description' => 'The user\'s campaign member object salesforce ID.',
+      ),
+      'cmsfid' => array(
+        'type' => 'varchar', 
+        'length' => 255, 
+        'not null' => FALSE, 
+        'default' => 0, 
+        'description' => 'The user\'s class member object salesforce ID.',
+      ),
+      'data' => array(
+        'type' => 'blob', 
+        'size' => 'big', 
+        'not null' => TRUE, 
+        'serialize' => TRUE, 
+        'object default' => array()
+      ),
+    ),
+    'primary key' => array('uid', 'wid'),
+  );
+
+  return $schema;
+} 
+
+/**
+ * Implements of hook_uninstall().
+ */
+function gsa_training_uninstall() {
+  variable_del('gsa_training_webinar_path');
+  variable_del('gsa_training_passing_score');
+  variable_del('gsa_training_webinar_alert');
+  variable_del('gsa_training_enable_salesforce');
+  variable_del('gsa_training_confirmation_email_template');
+} 
+
+function gsa_training_update_6001() {
+  $ret = array();
+  db_add_field(
+    $ret, 
+    'gsa_training_results', 
+    'cmsfid',
+    array('type' => 'varchar', 'length' => 255, 'not null' => FALSE, 'default' => 0, 'description' => t('The user\'s class member object salesforce ID.'))
+  );
+  return $ret;
+}

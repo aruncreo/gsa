@@ -1,0 +1,69 @@
+<?php
+
+/**
+ * Implements hook_uninstall().
+ */
+function gsa_subscriptions_uninstall() {
+  variable_del('gsa_subscriptions_subscribe_on_comment');
+}
+
+/**
+ * Implements hook_schema().
+ */
+function gsa_subscriptions_schema() {
+  $schema = array();
+  
+  $schema['gsa_subscriptions_notifications'] = array(
+    'description' => 'Store references to content updates',
+    'fields' => array(
+      'snid' => array(
+        'description' => 'The notification ID',
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'uid' => array(
+        'description' => 'The user ID',
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+      'nid' => array(
+        'description' => 'The entity ID',
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'action' => array(
+        'description' => 'The content-related action',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'timestamp' => array(
+        'description' => 'The Unix timestamp when the action occurred',
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'primary key' => array('uid', 'nid', 'action'),
+    'unique keys' => array(
+      'snid' => array('snid'),
+    ),
+    'indexes' => array(
+      'timestamp' => array('timestamp'),
+      'uid' => array('uid'),
+      'nid' => array('nid'),
+    ),
+  );
+
+  return $schema;
+}
+
+/**
+ * Install database schema.
+ */
+function gsa_subscriptions_update_7001() {
+  drupal_install_schema('gsa_subscriptions');
+}

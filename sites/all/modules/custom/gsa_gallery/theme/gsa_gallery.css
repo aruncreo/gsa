@@ -1,0 +1,24 @@
+#galleria-content .galleria_wrapper {
+  text-align: center;
+}
+#galleria-content ul.gallery {
+  padding: 20px 0;
+}
+#galleria-content div.galleria-nav {
+  font-size: 130%;
+  font-weight: bold;
+  text-align: center;
+  margin: 5px 0;
+}
+#galleria-content #main-image span.caption {
+  display: block;
+  background: #f8f8f8;
+  border: 1px solid #eee;
+  padding: 10px;
+  text-align: center;
+  margin: 5px 0;
+  font-size: 125%;
+  font-weight: bold;
+  -moz-border-radius: 10px;
+  -webkit-border-radius: 10px;
+}

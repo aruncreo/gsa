@@ -1,0 +1,13 @@
+name = Userpoints User Picture
+description = Users earn points for adding a user picture.
+package = Userpoints
+core = 7.x
+files[] = userpoints_user_picture.module
+dependencies[] = userpoints
+configure = admin/config/people/userpoints/settings
+; Information added by drupal.org packaging script on 2011-02-25
+version = "7.x-1.x-dev"
+core = "7.x"
+project = "userpoints_user_picture"
+datestamp = "1298620581"
+

@@ -1,0 +1,140 @@
+<?php
+
+/**
+ * @file
+ * Adds federal google analytics js to every page load via
+ * a select list populated with the .js files in the fed_analytics library
+ * directory.
+ */
+
+/**
+ * Implements hook_init().
+ */
+function usfedgov_google_analytics_init() {
+
+  // Attempt to load the fed_analytics js library array.
+  $library = libraries_detect('fed_analytics');
+
+  // Library detection was successful, proceed with loading select list and
+  // script header information.
+  if ($library['installed']) {
+    _usfedgov_google_analytics_load();
+  }
+  else {
+    // Print dependency error message and drush/manual download instructions.
+    drupal_set_message(t('The <a href="@usfedgov_google_analytics">fed_analytics</a> javascript library is missing. Use <code>drush fed_analytics_libs</code> to download and create the library after enabling the usfedgov_google_analytics_libs module, or see <a href="@readme">README.md</a> for instructions on how to manually download and extract the files.', array(
+          '@usfedgov_google_analytics' => 'https://github.com/GSA/DAP-Gov-wide-GA-Code/archive/master.zip/',
+          '@readme' => url(drupal_get_path('module', 'usfedgov_google_analytics') . '/README.md'),
+        )
+      ), 'error', FALSE);
+    module_disable(array('usfedgov_google_analytics'), TRUE);
+  }
+}
+
+/**
+ * Implements hook_permission().
+ */
+function usfedgov_google_analytics_permission(){
+  return array(
+    'administer federal google analytics'=> array(
+      'title' => t('Administer Federal Google Analytics'),
+      'restrict access' => TRUE
+    )
+  );
+}
+
+/**
+ * Implements hook_menu().
+ */
+function usfedgov_google_analytics_menu() {
+  $items = array();
+
+  $items['admin/config/system/usfedgov_google_analytics'] = array(
+    'title' => 'Federal Google Analytics',
+    'description' => 'Configuration for federal google analytics module',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('usfedgov_google_analytics_form'),
+    'access arguments' => array('administer federal google analytics'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  return $items;
+}
+
+/**
+ * Page callback: Federal Google Analytics settings.
+ *
+ * @see usfedgov_google_analytics_menu()
+ */
+function usfedgov_google_analytics_form($form, &$form_state) {
+
+  // Populate select list with js files in fed_analytics library directory.
+  usfedgov_google_analytics_gen_array();
+
+  // Select field for js file selection.
+  $form['usfedgov_google_analytics_js_selection'] = array(
+    '#type' => 'select',
+    '#default_value' => variable_get('usfedgov_google_analytics_js_selection', ''),
+    '#title' => t('Federal Google Analytics JS File Selection'),
+    '#options' => variable_get('js_options', ''),
+    '#description' => t('Select the google analytics js file that should be included on this site.'),
+  );
+
+  // Submit button.
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Save settings'),
+  );
+
+  return $form;
+}
+
+/**
+ * Save configuration settings for federal google analytics module.
+ */
+function usfedgov_google_analytics_form_submit($form, &$form_state) {
+  variable_set('usfedgov_google_analytics_js_selection',
+    $form_state['values']['usfedgov_google_analytics_js_selection']
+  );
+
+  drupal_set_message(t('The settings have been saved'));
+}
+
+/**
+ * Function to scan module's js directory, form associative array of .js files.
+ */
+function usfedgov_google_analytics_gen_array() {
+  // Get the directory to scan for .js files.
+  $directory = libraries_get_path('fed_analytics');
+
+  // Create a handler to the directory.
+  $dirhandler = opendir($directory);
+
+  // Read all the files from fed_analytics library directory ending in .js.
+  while ($file = readdir($dirhandler)) {
+    // If $file isn't this directory or its parent, add to the $files array.
+    if ($file != '.' && $file != '..' && (substr($file, -3) == '.js')) {
+      $files[] = $file;
+    }
+  }
+  // Form associative array with drupal_map_assoc so the select list value
+  // is the file name and not the array index. Store array in variable.
+  $js_options = drupal_map_assoc($files);
+
+  // Close the handler.
+  closedir($dirhandler);
+
+  // If directory contents have changed then update the global variable.
+  if ($js_options != variable_get('js_options', NULL)) {
+    variable_set('js_options', $js_options);
+  }
+}
+
+/**
+ * Function to load user's js file selection with drupal_add_js.
+ */
+function _usfedgov_google_analytics_load() {
+  if ($js_selection = variable_get('usfedgov_google_analytics_js_selection', NULL)) {
+    drupal_add_js(libraries_get_path('fed_analytics') . '/' . $js_selection);
+  }
+}

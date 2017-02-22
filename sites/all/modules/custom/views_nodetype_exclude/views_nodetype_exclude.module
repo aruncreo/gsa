@@ -1,0 +1,193 @@
+<?php
+
+/**
+ * Implementation of hook_form_alter().
+ */
+function views_nodetype_exclude_form_alter(&$form, &$form_state, $form_id) {
+  if ($form_id == 'node_type_form') {
+
+    $form['views_nodetype_exclude'] = array(
+        '#type' => 'fieldset',
+        '#title' => t('Views exclusions'),
+    );
+
+    $form['views_nodetype_exclude']['excludemode'] = array(
+        '#type' => 'radios',
+        '#title' => t('Exclusion mode'),
+        '#options' => array(
+            0 => t('Exclude this node type from the views selected below.'),
+            1 => t('Include this node type only on the views selected below.'),
+        ),
+        '#default_value' => _views_nodetype_exclude_get_nodetype_mode($form['#node_type']->type),
+    );
+
+    $form['views_nodetype_exclude']['viewslist'] = array(
+        '#type' => 'select',
+        '#multiple' => TRUE,
+        '#size' => 20,
+        '#options' => _views_nodetype_exclude_get_nodeviews(),
+        '#default_value' => _views_nodetype_exclude_get_views($form['#node_type']->type),
+        '#description' => t('If no views are selected, this content type will be available ' .
+            'to all views regardless of the exclusion mode.'),
+    );
+
+    array_unshift($form['#submit'], '_views_nodetype_exclude_node_type_submit');
+
+  }
+}
+
+/**
+ * Implementation of hook_views_query_alter().
+ */
+function views_nodetype_exclude_views_query_alter(&$view, &$query) {
+  if ($view->base_table == 'node') {
+    $typemodes = _views_nodetype_exclude_get_typemodes();
+    $checked_types = _views_nodetype_exclude_get_types($view->name);
+    $excluded_types = array();
+
+    foreach ($typemodes as $type => $mode) {
+      if ($mode == 1 xor in_array($type, $checked_types)) {
+        $query->add_where(0, "node.type not in ('%s')", $type);
+      }
+    }
+  }
+}
+
+/**
+ * Return an array of views which use node as the base table.
+ */
+function _views_nodetype_exclude_get_nodeviews() {
+  $nodeviews = array();
+  foreach (views_get_all_views() as $name => $view) {
+    if ($view->base_table == 'node') {
+      $nodeviews[$name] = $name;
+    }
+  }
+  return $nodeviews;
+}
+
+/**
+ * Return the exclusion mode for a given node type.
+ */
+function _views_nodetype_exclude_get_nodetype_mode($type) {
+  if ($db_result = db_select('views_nodetype_exclude')
+          ->fields('views_nodetype_exclude', array('mode'))
+          ->condition('type',$type, '=')
+          ->range(0,1)
+          ->execute()
+          ->fetchAll()){
+    foreach($db_result as $key){
+      $mode = $key->mode;
+    }
+  }
+
+  /*   $db_result = db_query("SELECT mode FROM {views_nodetype_exclude} WHERE type = '%s' LIMIT 1", $type)) {
+   while ($row = db_fetch_object($db_result)) {
+  $mode = $row->mode;
+  }
+  }  */
+  else {
+    $mode = 0;
+  }
+  return $mode;
+}
+
+/**
+ * Return an array of views for a given node type.
+ */
+function _views_nodetype_exclude_get_views($type) {
+  if ($type == '') {
+    // Return an empty array if $type is blank (new node type form)
+    return array();
+  } else {
+    $views = array();
+    /* $db_result = db_query("SELECT view FROM {views_nodetype_exclude} WHERE type = '%s'", $type);
+     while ($row = db_fetch_object($db_result)) {
+    $views[] = $row->view;
+    } */
+
+    $db_result = db_select('views_nodetype_exclude')
+    ->fields('views_nodetype_exclude', array('view'))
+    ->condition('type',$type, '=')
+    ->execute()
+    ->fetchAll();
+
+    if($db_result){
+      foreach($db_result as $key){
+        $views[] = $key->view;
+      }
+    }
+    return $views;
+  }
+}
+
+/**
+ * Return an array of node types that have exclusions for a given view.
+ */
+function _views_nodetype_exclude_get_types($viewname) {
+  $types = array();
+  /* $db_result = db_query("SELECT type FROM {views_nodetype_exclude} WHERE view = '%s'", $viewname);
+   while ($row = db_fetch_object($db_result)) {
+  $types[] = $row->type;
+  }
+  */
+  $db_result = db_select('views_nodetype_exclude')
+  ->fields('views_nodetype_exclude', array('type'))
+  ->condition('view',$viewname, '=')
+  ->execute()
+  ->fetchAll();
+
+  if($db_result){
+    foreach($db_result as $key){
+      $types[] = $key->type;
+    }
+  }
+  return $types;
+}
+
+/**
+ * Return an array of all node types that have exclusions, and their modes.
+ */
+function _views_nodetype_exclude_get_typemodes() {
+  $types = array();
+  //$db_result = db_query("SELECT DISTINCT type, mode FROM {views_nodetype_exclude} WHERE 1");
+
+  $db_result = db_select('views_nodetype_exclude')
+  ->fields('views_nodetype_exclude', array('type','mode'))
+  ->distinct(true)
+  //->condition('mode', 1, '=')
+  ->execute()
+  ->fetchAll();
+
+  if($db_result){
+    foreach($db_result as $key){
+      $types[$key->type] = $key->mode;
+    }
+  }
+
+  /* while ($row = db_fetch_object($db_result)) {
+   $types[$row->type] = $row->mode;
+  } */
+  return $types;
+}
+
+/**
+ * Save updates to a node type's list of excluded view when node_type_form
+ * is submitted.
+ */
+function _views_nodetype_exclude_node_type_submit($form, &$form_state) {
+  $type = $form['#node_type']->type;
+  if ($type !== '') {
+    //$db_result = db_query("DELETE FROM {views_nodetype_exclude} WHERE type = '%s'", $type);
+    $db_result = db_delete('views_nodetype_exclude')
+    ->condition('type', $type, '=')
+    ->execute();
+
+    foreach ($form_state['values']['viewslist'] as $k => $view) {
+      $mode = $form_state['values']['excludemode'];
+      $data = array( 'view' => $view, 'type' => $type, 'mode' => $mode );
+      drupal_write_record('views_nodetype_exclude', $data);
+    }
+  }
+}
+

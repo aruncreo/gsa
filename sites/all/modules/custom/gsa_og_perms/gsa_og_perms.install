@@ -1,0 +1,9 @@
+<?php
+
+/**
+ * Implements hook_uninstall().
+ */
+function gsa_og_perms_uninstall() {
+  variable_del('gsa_og_perms_og_core_rolemap');
+  variable_del('gsa_og_perms_core_og_rolemap');
+}

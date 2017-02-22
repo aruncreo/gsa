@@ -1,0 +1,328 @@
+<?php
+
+include_once 'gsa_group_page.features.inc';
+
+/**
+ * Implements hook_init().
+ */
+function gsa_group_page_init() {
+  $path = drupal_get_path('module', 'gsa_group_page');
+  drupal_add_js($path . '/js/gsa_group_page.js', array('scope' => 'footer'));
+  drupal_add_css($path . '/theme/open-sans/stylesheet.css');
+  drupal_add_css($path . '/theme/gsa_group_page.css');
+   
+
+}
+
+/**
+ * Implements hook_block_info().
+ */
+function gsa_group_page_block_info() {
+  $blocks = array();
+  $blocks['groupmenu'] = array(
+    'info' => t('Group menu'),
+    'cache' => DRUPAL_NO_CACHE,
+  );
+  return $blocks;
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function gsa_group_page_block_view($delta = '') {
+  switch ($delta) {
+    case 'groupmenu':
+      return array(
+        'subject' => NULL,
+        'content' => _gsa_group_page_group_menu(),
+      );
+      break;
+  }
+}
+
+/**
+ * Implements hook_theme().
+ */
+function gsa_group_page_theme($existing, $type, $theme, $path) {
+  $items = array();
+  $items['gsa_group_page_group_menu'] = array(
+    'variables' => array('menu' => NULL, 'group' => NULL, 'node' => NULL),
+    'file' => 'gsa_group_page.theme.inc',
+    'path' => $path . '/theme',
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_views_pre_view().
+ */
+function gsa_group_page_views_pre_view(&$view, &$display_id, $args) {
+  global $gsa_group_page_views_context;
+  switch ($view->name) {
+    case 'group_information':
+      if ($display_id == 'page_1') {
+        $gsa_group_page_views_context = og_context(og_get_group('node', $args[0]));
+      }
+      break;
+  }  
+}
+
+/**
+ * Implements hook_views_pre_render().
+ */
+function gsa_group_page_views_pre_render(&$view) {
+  switch ($view->name) {
+    case 'gsa_og_announcement':
+     if (isset($view->result[0]->field_field_group_announcement_title[0]['raw']) && $view->current_display == 'block') {
+        $view->build_info['title'] = t($view->result[0]->_field_data['nid']['entity']->field_group_announcement_title['und'][0]['value']);
+      }
+      if (isset($view->result[0]->_field_data['nid']['entity']->field_announcement_title2['und'][0]['value']) && $view->current_display == 'block_1') {
+      	$view->build_info['title'] = t($view->result[0]->_field_data['nid']['entity']->field_announcement_title2['und'][0]['value']);
+      }  
+      break;
+  }
+}
+
+/**
+ * Implements hook_og_fields_info_alter().
+ *
+ * Change the default formatter of the group field in views.
+ */
+function gsa_group_page_og_fields_info_alter(&$items) {
+  $items[OG_GROUP_FIELD]['instance']['display']['default']['type'] = 'gsa_group_page_og_group_subscribe';
+}
+
+/**
+ * Implements hook_field_formatter_info().
+ */
+function gsa_group_page_field_formatter_info() {
+  return array(
+    'gsa_group_page_og_group_subscribe' => array(
+      'label' => t('GSA Group subscription'),
+      'field types' => array('list_boolean'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_field_formatter_view().
+ *
+ * Hide unsubscribe links provided via og_ui group field formatter in views,
+ * replace link label for subscribe links with "Join"
+ */
+function gsa_group_page_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  $element = array();
+
+  if ($field['field_name'] == OG_GROUP_FIELD && $links = og_ui_subscribe_link($entity_type, $entity)) {
+    if (empty($links['#href'])) {
+      return array();
+    }
+    $link_href_args = explode('/', $links['#href']);
+    $op = array_pop($link_href_args);
+	
+	if($links['#title']=='Subscribe to group')
+	{
+	 $links['#title'] = t('Join');
+	}
+    switch ($op) {
+      case 'unsubscribe':
+        return array();
+        break;
+      case 'subscribe':
+        $links['#title'] = t('Join');
+        break;
+    }
+
+    $element[0] = $links;
+	
+	
+
+  }
+  
+ 
+  return $element;
+ 
+}
+
+/**
+ * Provide a group menu
+ */
+function _gsa_group_page_group_menu() {
+  global $user;
+  
+     // Load the current group
+  if (!($group = og_features_get_group_context())) {
+      $paramArray=explode('/',$_GET['q']);
+    $group=og_load($paramArray[1], $reset = FALSE);
+  }
+  
+
+  if (!($group)) {
+    return NULL;
+  }
+  
+  // Load the group node, if one
+  if (!($node = gsa_group_page_get_group_node($group))) {
+    return NULL;
+  }
+  
+  // Load the content types
+  $types = gsa_group_page_get_group_content_types($group);
+  
+  // Home
+  $menu['home'] = l(t('Home'), "node/{$node->nid}");
+    
+  // Explore
+  foreach ($types AS $type) {
+    // @todo: any sane way of accurately pluralizing and translating?
+    $label = str_replace(t('entry'), t('entrie'), $type->name) . t('s');
+
+	if($type->type!='group_feed'){
+		if($type->type=='event'){
+			$menu['explore']['items'][$type->type] = l($label, "{$GLOBALS['base_url']}/node/$group->gid/events");
+		// Past Events
+		$menu['explore']['items']['past_events'] = l('Past Events', "{$GLOBALS['base_url']}/node/{$group->gid}/past-events");
+		}elseif($type->type=='poll'){
+			$menu['explore']['items'][$type->type] = l($label, "{$GLOBALS['base_url']}/group-poll/$group->gid");
+		}elseif($type->type=='group_feed_item'){
+		//$menu['explore']['items'][$type->type] = l($label, "{$GLOBALS['base_url']}/node/$group->gid/group-feed-item");
+			
+			// Adding Content Archive to submenu
+			if ($group->gid == gsa_cpat_get_cpat_group(FALSE)){
+				$menu['explore']['items']['archived_content'] = l('Archived Content', "{$GLOBALS['base_url']}/node/{$node->nid}/ctat-content-archived");
+			} else {
+				$menu['explore']['items']['archived_content'] = l('Archived Content', "{$GLOBALS['base_url']}/node/{$node->nid}/group-content-archived");
+			}
+		}else{
+			$menu['explore']['items'][$type->type] = l($label, "{$GLOBALS['base_url']}/node/{$node->nid}/group-content/{$type->type}");
+		}
+	}
+    
+  }
+  if (isset($menu['explore']['items'])) {
+    $menu['explore']['_label'] = t('Content');
+    // Add "All content" link
+    array_unshift($menu['explore']['items'], l(t('All content'), "{$GLOBALS['base_url']}/node/{$node->nid}/group-content"));
+  }
+  
+  // Contribute
+  foreach ($types AS $type) {
+    // Check access to add these nodes
+    if (og_user_access($group->gid, "create {$type->type} content")) {
+      $type_clean = str_replace('_', '-', $type->type);
+	  if($type->type!='group_feed_item'){
+		$menu['contribute']['items'][$type->type] = l($type->name, "node/add/{$type_clean}", array('query' =>  array("gids_{$group->bundle_name}" => array($group->gid))));
+	  }
+	}
+  }
+  if (isset($menu['contribute']['items'])) {
+    $menu['contribute']['_label'] = t('Contribute');
+  }
+    
+  // Members
+  $menu['members']['_label'] = t('Members');
+  $menu['members']['items']['list'] = l(t('List members'), "node/{$node->nid}/members");
+  
+  // Group settings
+  if (og_user_access($group->gid, 'administer group')) {
+    $menu['administer']['_label'] = t('Manage');
+    $menu['administer']['items']['edit'] = l(t('Edit group'), "node/{$node->nid}/edit");
+    $menu['administer']['items']['admin'] = l(t('Administer group'), "node/{$node->nid}/group");
+   // $menu['administer']['items']['feeds'] = l(t('Group feeds'), "node/{$node->nid}/group-feeds");
+  }
+
+  // User settings
+  if (user_is_logged_in()) {
+    $menu['mysettings']['_label'] = t('My settings');
+    //$menu['mysettings']['items']['edit'] = l(t('Account'), "user/{$user->uid}/edit");
+	$checkgroup = og_features_get_group_context();
+	if(isset($checkgroup)){
+		$menu['mysettings']['items']['edit'] = l(t('leave group'), "group/node/{$node->nid}/unsubscribe/group");
+	}else{
+		$menu['mysettings']['items']['edit'] = l(t('leave group'), "group/node/{$node->nid}/unsubscribe/");
+	}
+	
+	// $menu['mysettings']['items']['edit'] = l(t('leave group'), "user/{$user->uid}/my-groups");
+    //$menu['mysettings']['items']['notifications'] = l(t('Notifications'), "user/{$user->uid}/notifications");
+    $menu['mysettings']['items']['subscriptions'] = l(t('Subscriptions'), "user/{$user->uid}/message-subscribe");
+    $menu['mysettings']['items']['relationships'] = l(t('Friends'), "user/{$user->uid}/relationships");
+  }
+  
+  // Search
+  $menu['search'] = l(t('Group Search'), "node/{$node->nid}/group-search", array('attributes' => array('class' => array('gsa-menu-search-link'))));
+    
+  // Allow other modules to alter this menu
+  drupal_alter('gsa_group_page_group_menu', $menu, $group, $node);  
+    
+  return theme('gsa_group_page_group_menu', array('menu' => $menu, 'group' => $group, 'node' => $node));
+}
+
+/**
+ * Fetch all available group node content types
+ * 
+ * @param $group
+ *   Optionally specify a group, which will be used to filter disabled
+ *   content types for the given group. If omitted, the current group
+ *   will be used, if one.
+ * @return
+ *   An array of node types, keyed by name.
+ */
+function gsa_group_page_get_group_content_types($group = NULL) {
+  $types = array();
+  
+  // Iterate all available node types
+  foreach (node_type_get_types() AS $type => $details) {
+    // Check if this type is a group content type
+    if (og_is_group_content_type('node', $type)) {
+      // See if we have a group to work with
+      if ($group || ($group = og_features_get_group_context())) {
+        // Skip this type if it's disabled within this group
+        if (og_features_component_is_disabled('node', $type, $group)) {
+          continue;
+        }
+      }
+      $types[$type] = $details;
+    }
+  }
+  return $types;
+}
+
+/**
+ * Return a group entities parent node, if one is available
+ * 
+ * @param $group
+ *   A group entity. If omitted, the current group will be used.
+ * @return
+ *   The group's parent node, otherwise NULL.
+ */
+function gsa_group_page_get_group_node($group = NULL) {
+  if ($group || ($group = og_features_get_group_context())) {
+    if (isset($group->entity_type)) {
+      if ($group->entity_type == 'node') {
+        return $group->entity;
+      }
+    }
+  }
+  return NULL;
+}
+
+/**
+* Return member count for a specific group
+* 
+* @parem $groupid
+*   The group id for which member count need to be retrived
+* @return
+*   The member count for the group requested
+*/
+function gsa_group_page_get_member_count($groupid){
+   $query = db_select('og_membership')
+  ->fields('og_membership')
+  ->condition('gid', $groupid)
+  ->condition('entity_type', 'user')
+  ->condition('etid', '1', '>')
+  ->condition('state', '1');
+  
+  $result = $query->execute()->rowCount();
+  return $result;
+}
+

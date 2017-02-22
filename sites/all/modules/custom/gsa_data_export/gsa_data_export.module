@@ -1,0 +1,23 @@
+<?php
+/**
+ * @file
+ * Code for the GSA Data Export feature.
+ */
+
+include_once 'gsa_data_export.features.inc';
+
+
+
+/**
+* Implemnts hook_gsa_group_page_group_menu_alter().
+* 
+* @param $menu
+* 	The menu array to be altered
+* @param $group
+*  Group in context
+* @param $node
+* 
+*/
+function gsa_data_export_gsa_group_page_group_menu_alter(&$menu,$group,$node){
+	$menu['administer']['items']['member_download_list']=l(t('Download Member List'), "gsa-user-data-export/".$group->gid);
+}

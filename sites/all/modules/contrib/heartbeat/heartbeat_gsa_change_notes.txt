@@ -1,0 +1,1 @@
+Added views-view-row-rss.tpl.php from Views module theme

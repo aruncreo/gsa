@@ -1,0 +1,74 @@
+<?php
+
+/**
+ * Implementation of hook_init().
+ */
+function gsa_my_groups_init() {
+}
+
+/**
+ * Implements hook_menu().
+ */
+function gsa_my_groups_menu() {
+}
+
+/**
+ * Implements hook_block_info().
+ */
+function gsa_my_groups_block_info() {
+  // Create block for ask question.
+  $blocks['gsa_my_groups'] = array(
+      'info' => t('GSA My groups'),
+  );
+  return $blocks;
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function gsa_my_groups_block_view($delta = '') {
+  global $user;
+  $block = array();
+
+  //The $delta parameter tells us which block is being requested.
+  switch ($delta) {
+    case 'gsa_my_groups':
+      global $user;
+      $block['subject'] = '';
+      $block['content'] = gsa_get_my_groups($user->uid);
+      break;
+  }
+  return $block;
+}
+
+/**
+ * Function callback to get my groups
+ * @param unknown_type $uid
+ * @return string
+ */
+function gsa_get_my_groups($uid){
+  global $base_url;
+  $counter = 0;
+  $gids = og_get_groups_by_user();
+  sort($gids);
+  foreach ($gids as $kk => $gid){
+    if ($counter == 4){
+      unset($gids[$kk]);
+    }
+    $counter++;
+  }
+  $group = og_load_multiple($gids);
+  $content = '<div class="my-group">';
+  if ($group){
+    foreach ($group as $key => $value){
+      $node = node_load($value->etid);
+      $content .= '<p>' . l($value->label,$base_url . url('node/'. $node->nid)) .'</p>';
+    }
+  }
+  else {
+    $link = l('Community', 'groups');
+    $content .= '<p>' . t('You have not joined any groups. Visit !link to get started.', array('!link' => $link)) . '</p>';
+  }
+  $content .= '<div style="clear:both;"></div></div>';
+  return $content;
+}

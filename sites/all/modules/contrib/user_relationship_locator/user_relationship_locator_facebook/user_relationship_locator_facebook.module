@@ -1,0 +1,130 @@
+<?php
+/**
+ * Basic implementation of User Relationship Locator network to provide a local relationship graph. 
+ */
+
+if(module_exists('fboauth')) {
+  module_load_include('inc', 'fboauth', 'includes/fboauth.fboauth');
+}
+
+/**
+ * Implements hook_urlocator_network_update().
+ * This will update user list on each cron run
+ */
+function user_relationship_locator_facebook_urlocator_network_update() {
+  $users = user_relationship_locator_facebook_users();
+  $users = serialize($users);
+  $update = db_update('user_relationship_locator')
+    ->fields(array('users'=>$users))
+    ->condition('netname','facebook')
+    ->execute();
+  return $update;
+}
+
+/**
+ * Implements hook_urlocator_user_query().
+ * Get a list of a current users relationships and build out a list of uids
+ * @return matches array
+ *   returns an array of uids for main locator module to combine with results from other submodules
+ * $currentuser 
+ *   the user we want to find matches to almost always actual current user
+ */
+function user_relationship_locator_facebook_urlocator_user_query($currentuser){
+  $matches = array();
+  if(module_exists('fboauth')) {
+    //Find some Facebook user ids.
+    //where did we save my results? $myfriends = 
+    $myfriends = array();
+
+    GLOBAL $user;
+    $fb_cache = cache_get($user->uid, 'cache_user_relationship_locator_facebook');
+    $fb_request_data = $fb_cache->data;
+
+    $fbquery = db_query('SELECT uid, fbid FROM {fboauth_users}');
+    foreach($fbquery as $existingfbuser) {
+      $existing_users[$existingfbuser->fbid]= $existingfbuser->uid;
+    }
+    $intersects = array_intersect_key($existing_users,$fb_request_data);
+    foreach($intersects as $match) {
+      //Query to replace fbid with uid.
+      //Give these full weight (top of list) matches don't get more accurate than this.
+      $matches[$match] = 1;
+    }
+  }
+  return $matches;
+}
+
+/**
+ * Return current all users array for use by other functions
+ */
+function user_relationship_locator_facebook_users($modules) {
+  $users = array();
+  if(module_exists('fboauth')) {
+    $result = db_query("SELECT uid FROM {fboauth_users}");
+    foreach ($result as $user) {
+      $users[$user->uid] = $user->uid;
+    }
+  }
+  return $users;
+}
+
+/**
+ * Implements hook_fboauth_actions().
+ *
+ * Registers our user request through fboauth.
+ */
+function user_relationship_locator_facebook_fboauth_actions() {
+  // Give each action a unique key, such as "mymodule_photo_import" for a photo
+  // import. This function should begin with the name of your module.
+  $actions['user_relationship_locator_users'] = array(
+    // Give you action a human-readable name. This will be used when showing
+    // the user a link to start this action.
+    'title' => t('Find on Facebook'),
+
+    // Specify the name of your callback function that contains the import.
+    'callback' => 'user_relationship_locator_facebook_fboauth_users',
+
+    // Specify permissions you need to do this action. See the Facebook API for
+    // a list: http://developers.facebook.com/docs/authentication/permissions/
+    'permissions' => array(
+      'read_friendlists', // Gets access to a user's friends.
+    ),
+  );
+  return $actions;
+}
+
+/**
+ * Facebook OAuth action callback; 
+ * Find our friend list for comparison;
+ */
+function user_relationship_locator_facebook_fboauth_users($app_id, $access_token) {
+  GLOBAL $user;
+  // Query against the Facebook Graph API. See the Facebook API for a list of
+  // commands: http://developers.facebook.com/docs/reference/api/
+  $result = fboauth_graph_query('me/friends', $access_token);
+  $fb_friends = array();
+  foreach ($result->data as $friend) {
+    $fb_friends[$friend->id] = $friend->name;
+  }
+  if(!empty($fb_friends)) {
+    cache_set($user->uid, $fb_friends, 'cache_user_relationship_locator_facebook');
+  }
+  return;
+}
+
+/**
+ * Helper function to see if the current user has current results
+ */
+function user_relationship_locator_facebook_result_cache($uid = NULL) {
+  if(empty($uid)) {
+    GLOBAL $user;
+    $uid = $user->uid;
+  }
+
+  if($results = cache_get($uid,'cache_user_relationship_locator_facebook')) {
+    return $results;
+  }
+  else {
+    return FALSE;
+  }
+}

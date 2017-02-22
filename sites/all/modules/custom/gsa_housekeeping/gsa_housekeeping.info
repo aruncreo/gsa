@@ -1,0 +1,6 @@
+; $Id: gsa_housekeeping.info 44 2012-06-22 13:39:38Z rahulp $
+name = GSA Housekeeping
+description = Perform additional maintenance when cron runs.
+package = GSA
+core = 7.x
+version = 7.x-1.0

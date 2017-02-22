@@ -1,0 +1,114 @@
+<?php
+/**
+ * Basic implementation of User Relationship Locator network to provide a local relationship graph. 
+ */
+
+/**
+ * Implements hook_urlocator_network_update().
+ * This will update user list on each cron run
+ */
+function user_relationship_locator_graph_urlocator_network_update() {
+  $users = user_relationship_locator_graph_users();
+  $users = serialize($users);
+  $update = db_update('user_relationship_locator')
+    ->fields(array('users'=>$users))
+    ->condition('netname','graph')
+    ->execute();
+  return $update;
+}
+
+/**
+ * Implements hook_urlocator_user_query().
+ * Get a list of a current users relationships and build out a list of uids
+ * @return matches array
+ *   returns an array of uids for main locator module to combine with results from other submodules
+ * $currentuser 
+ *   the user we want to find matches to almost always actual current user
+ */
+function user_relationship_locator_graph_urlocator_user_query($currentuser){
+  $matches = array();
+  $iteration = 1;
+  //default to friends of friends (depth of 1) unless we have already specified more
+  $depth = variable_get('user_relationship_locator_graph_depth','1');
+
+  $people_you_know = user_relationship_locator_graph_relations_lookup($currentuser,$iteration);
+  foreach ($people_you_know as $key => $value) {
+    $init_matches = user_relationship_locator_graph_relations_lookup($key,$iteration,$currentuser);
+    foreach ($init_matches as $key => $value) {
+      if(!array_key_exists($key,$people_you_know)) {
+        $matches[$key] = $iteration;
+      }
+    }
+  }
+  for($iteration = 1; $iteration <= $depth; $iteration++) {
+    foreach ($matches as $userid => $score) {
+      //TODO: only check values added in the last round
+      $deeper_matches = user_relationship_locator_graph_relations_lookup($userid,$iteration,$currentuser);
+      foreach ($deeper_matches as $key => $value) {
+        if(!array_key_exists($key,$matches)) {
+          if($iteration == 1) {
+            $matches[$key] = 0.5;
+          } else {
+            $matches[$key] = 0.2;
+          }
+        }
+        else {
+          $matches[$key] = $matches[$key] + 0.1;
+        }
+      }
+    }
+  }
+  return $matches;
+}
+
+/**
+ * Helper function for looking up a given users relations
+ */
+function user_relationship_locator_graph_relations_lookup($currentuser, $iteration, $exclude = NULL){
+  //UR API or direct db query?
+  //TODO: log performance here
+  $matches = array();
+  $relationship = variable_get('user_relationship_locator_relationship','');
+  $result = db_query("SELECT DISTINCT requestee_id FROM {user_relationships} WHERE rtid = :rtid AND requester_id = :requester", array(':rtid' => $relationship, ':requester' => $currentuser));
+  foreach ($result as $user) {
+    $matches[$user->requestee_id] = $iteration;
+  }
+  //exclude provided user
+  if(!empty($exclude)) {
+    unset($matches[$exclude]);
+  }
+
+  return $matches;
+}
+
+/**
+ * Return current all users array for use by other functions
+ */
+function user_relationship_locator_graph_users() {
+  $relationship = variable_get('user_relationship_locator_relationship'); 
+  $result = db_query("SELECT DISTINCT requestee_id FROM {user_relationships} WHERE rtid = :rtid", array(':rtid' => $relationship));
+  //TODO: there has to be a better way to do this with dbtng
+  $users = array();
+  foreach ($result as $user) {
+    $users[$user->requestee_id] = $user->requestee_id;
+  }
+  return $users;
+}
+
+/**
+ * Implements hook_form_alter().
+ * Alter main locator setting form to set the depth we should search for connections.
+ */
+function user_relationship_locator_graph_form_alter(&$form, &$form_state, $form_id) {  
+  if($form_id == 'user_relationship_locator_admin') {
+    $form['user_relationship_locator_graph_depth'] = array (
+      '#type' => 'textfield',
+      '#title' => t('Depth to search for relationship matches.'),
+      '#description' => t('1 = Friend of a Friend 2 = Friend of a Friend of a Friend etc.'),
+      '#default_value' => variable_get('user_relationship_locator_graph_depth',''),
+      '#maxlength' => 1,
+      '#size' => 1,
+    ); 
+    return $form;
+  }
+}

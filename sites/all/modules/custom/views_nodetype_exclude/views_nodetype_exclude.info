@@ -1,0 +1,7 @@
+; $Id: views_nodetype_exclude.info 60 2012-06-22 19:51:53Z keyurp $
+
+name = Views Nodetype Exclude
+core = "7.x"
+description = "Allows global exclusion of nodetypes from Views."
+package = Views
+dependencies[] = views

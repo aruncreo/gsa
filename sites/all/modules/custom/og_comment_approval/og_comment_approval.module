@@ -1,0 +1,284 @@
+<?php
+/**
+ * @file
+ * Code for the OG Comment Approval feature.
+ */
+
+include_once 'og_comment_approval.features.inc';
+require_once('og_comment_approval.comment.inc');
+
+/**
+ * Implements hook_menu_alter().
+ */
+function og_comment_approval_menu_alter(&$items) {
+  $path = drupal_get_path('module', 'og_comment_approval');
+  $items['comment/%/approve']['access callback'] = 'og_comment_approval_comment_moderate_access';
+  $items['comment/%/approve']['access arguments'] = array(1);
+}
+
+/**
+ * Implements hook_comment_view_alter().
+ *
+ * 
+ */
+function og_comment_approval_comment_view_alter(&$build) {
+  $comment = $build['#comment'];
+
+  // Remove comment links if no access
+  if (!og_comment_approval_comment_moderate_access($comment->cid)) {
+    unset($build['links']['comment']);
+    return;
+  }
+
+  // Fix the incorrect token added to the approve link by comment_og.
+  if (isset($build['links']['comment']['#links']['comment-approve'])) {
+    $build['links']['comment']['#links']['comment-approve']['query'] = array('token' => drupal_get_token("comment/$comment->cid/approve"));
+  }
+}
+
+/**
+ * Implements hook_mail().
+ */
+function og_comment_approval_mail($key, &$message, $params) {
+  switch ($key) {
+    case 'pending_comment':
+      // Extract params
+      extract($params);
+      
+      // See if we can get the author's username
+      $author = user_load($comment->uid);
+      $name = $author->name;
+
+      // Set the subject
+      $message['subject'] = t('There is a new comment pending approval in your group');
+
+      // Set the body
+      $body = t('A comment made in the group "!group" is awaiting administrative approval.', array('!group' => check_plain($group->label)));
+      $body .= "\n\n";
+      $body .= t('User name: !username', array('!username' => check_plain($name)));
+      $body .= "\n\n";
+      $body .= t('Comment:') . "\n";
+      $body .= strip_tags($comment->comment_body[LANGUAGE_NONE][0]['value']);
+      $body .= "\n\n";
+      $body .= t('View the pending comments in the group: !link', array('!link' => url("{$group->entity_type}/{$group->etid}/moderate-comments", array('absolute' => TRUE))));
+      if ($params['multiple']) {
+        $body .= "\n\n";
+        $body .= t('Note: This comment was made to an item posted in multiple groups that require comment moderation. ');
+        $body .= t('The comment may be published or deleted by the moderator of any of these groups.');
+      }
+
+      $message['body'] = array($body);
+      break;
+  } 
+}
+
+/**
+ * Implements hook_og_features_registry().
+ */
+function og_comment_approval_og_features_registry() {
+  $registry = array();
+  
+  // Feature: og_comment_approval
+  $feature = new stdClass;
+  $feature->id = 'og_comment_approval';
+  $feature->name = t('Comment approval');
+  $feature->description = t('Provide a comment-moderation queue for group admins, allowing them to approve comments before they are publically posted.<br/>If this feature is disabled when there are pending comments, they will not be accessible.');
+  $feature->components = array(
+    'views' => array(
+      'og_comment_approval',
+    ),
+    'og link' => array(
+      'og_comment_approval',
+    ),
+  );
+  $registry[$feature->id] = $feature;
+  
+  // Feature: og_comment_approval_notifications
+  $feature = new stdClass;
+  $feature->id = 'og_comment_approval_notifications';
+  $feature->name = t('Comment approval notifications');
+  $feature->description = t('If enabled, group admins will be emailed whenever a comment requires approval.');
+  $feature->components = array();
+  $registry[$feature->id] = $feature;
+  
+  return $registry;
+}
+
+/**
+ * Implements hook_permission().
+ */
+function og_comment_approval_permission() {
+  $perms = array();
+  $perms['moderate comments in all groups'] = array(
+    'title' => t('Moderate comments in all groups'),
+  );
+  return $perms;
+}
+
+/**
+ * Implements hook_og_permission().
+ */
+function og_comment_approval_og_permission() {
+  $perms = array();
+  $perms['moderate comments in group'] = array(
+    'title' => t('Moderate comments in group'),
+  );
+  return $perms;
+}
+
+/**
+ * Implements hook_comment_presave().
+ */
+function og_comment_approval_comment_presave($comment) {
+  global $user;
+
+  $notify_admin = FALSE;
+
+  // Get the groups this comment would be published to
+  $groups = og_comment_approval_get_comment_groups($comment);
+
+  // Determine evaluate sitewide permissions
+  $post_no_approval = user_access('skip comment approval');
+  $admin_site_comments = user_access('administer comments');
+
+  // Skip the moderation routine if this comment is being edited/moderated
+  // by someone other than its author.
+  if ($admin_site_comments && $user->uid != $comment->uid) {
+    return;
+  }
+
+  if ($post_no_approval || $admin_site_comments) {
+    $comment->status = COMMENT_PUBLISHED;
+  }
+  else {
+    $comment->status = COMMENT_NOT_PUBLISHED;
+    // Evaluate the group permissions
+    foreach ($groups as $group) {
+      // See if the approval feature is turned on
+      if (!og_features_feature_is_disabled('og_comment_approval', $group)) {
+        if (!og_user_access($group->gid, 'moderate comments in group') && !og_user_access($group->gid, 'administer group')) {
+          $comment->status = COMMENT_NOT_PUBLISHED;
+          // Remember that this comment can invoke an admin alert
+          $notify_admin = TRUE;
+          break;
+        }
+      }
+      else {
+        $comment->status = COMMENT_PUBLISHED;
+      }
+    }
+  }
+  
+  // Notify content moderators in all groups where enabled.
+  if ($notify_admin) {
+    $multiple = (count($groups) > 1);
+    foreach ($groups as $group) {
+      if (!og_features_feature_is_disabled('og_comment_approval_notifications', $group)) {
+        // get list of roles that have moderation permissions
+        $rids = array_keys(og_roles($group->gid, 'moderate comments in group'));
+        // get users with those roles
+        $moderators = og_get_users_by_roles($group->gid, $rids);
+        // keep track of users to avoid duplicates due to multiple roles
+        $mailed = array();
+        foreach ($moderators as $row) {
+          if (!in_array($row->uid, $mailed)) {
+            $mailed[] = $row->uid;
+            $account = user_load($row->uid);
+            drupal_mail(
+              'og_comment_approval',
+              'pending_comment',
+              $account->mail,
+              user_preferred_language($account),
+              array(
+                'group' => $group,
+                'comment' => $comment,
+                'multiple' => $multiple,
+              )
+            );
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_gsa_group_page_group_menu_alter().
+ */
+function og_comment_approval_gsa_group_page_group_menu_alter(&$menu, $group, $node) {
+  $menu['administer']['items']['og_comment_approval'] = og_comment_approval_admin_link($group);
+}
+
+/**
+ * Generate a link to moderate comments.
+ */
+function og_comment_approval_admin_link($group) {
+  global $user;
+  // Check if the current user has moderation permissions or is an admin
+  if (og_user_access($group->gid, 'moderate comments in group') || og_user_access($group->gid, 'administer group') || user_access('moderate comments in all groups')) {
+    // Make sure the approval feature is enabled
+    if (!og_features_feature_is_disabled('og_comment_approval', $group)) {
+      // Count the number of moderated comments
+      $query = db_select('comment', 'c');
+      $query->join('og_membership', 'ogm', 'c.nid = ogm.etid');
+      $query->condition('ogm.gid', $group->gid);
+      $query->condition('ogm.entity_type', 'node');
+      $query->condition('c.status', COMMENT_NOT_PUBLISHED);
+      $query->addExpression('COUNT(cid)', 'comment_count');
+      $result = $query->execute()->fetchAssoc();
+      
+      // Add a link to moderate the comments
+      // OG features will remove this, if disabled
+      return l(t('Approve comments (!count)', array('!count' => $result['comment_count'])), "node/{$group->etid}/moderate-comments");
+    }
+  }
+}
+
+/**
+ * Overridden access callback for comment moderation
+ * 
+ * @param $cid
+ *   The comment cid
+ * @return
+ *   TRUE if the user can moderate the given comment
+ */
+function og_comment_approval_comment_moderate_access($cid) {
+  global $user;
+  $permissions = &drupal_static(__FUNCTION__, array());
+  
+  // Check the static cache for the permission
+  if (isset($permissions[$user->uid][$cid])) {
+    return $permissions[$user->uid][$cid];
+  }
+
+  // Check sitewide permissions
+  if (user_access('moderate comments in all groups')) {
+    return $permissions[$user->uid][$cid] = TRUE;
+  }
+
+  // Check permissions in the group(s) the comment belongs to
+  $groups = og_comment_approval_get_comment_groups(comment_load($cid));
+  foreach ($groups as $group) {
+    if (!og_features_feature_is_disabled('og_comment_approval', $group)) {
+      // Make sure the current user has moderate permissions
+      if (og_user_access($group->gid, 'moderate comments in group')) {
+        // Grant access
+        return $permissions[$user->uid][$cid] = TRUE;
+      }
+    }
+  }
+  
+  // No access
+  return $permissions[$user->uid][$cid] = FALSE;
+}
+
+/**
+ * Get the group(s) of a comment's parent node.
+ *
+ * @return
+ *   Array of group objects.
+ */
+function og_comment_approval_get_comment_groups($comment) {
+  $gids = og_get_entity_groups('node', node_load($comment->nid));
+  return og_load_multiple($gids);
+}

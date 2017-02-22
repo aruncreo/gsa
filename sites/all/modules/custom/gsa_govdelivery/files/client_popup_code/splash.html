@@ -1,0 +1,118 @@
+<style type="text/css">
+body {
+	  margin:0px;
+	  padding:0px;
+  }
+#govd_background {
+	width:344px;
+	background-color:#ffffff;
+}
+
+#govd_whitebox {
+	background-color:#ffffff;
+}
+#govd_logo {
+	padding-bottom:15px;
+}
+#govd_signupcolor {
+	width:335px;
+	margin:5px;
+}
+#govd_overlay {
+	color:#FFFFFF;
+	/*padding-left:46px;*/
+	margin:0 auto;
+	font-family:Arial, Helvetica, sans-serif;
+}
+
+
+#overlay_form { 
+	color:#022945; 
+	padding-left:43px !important;
+	}
+
+#govd_email_address {
+	width:175px; 
+	color:#004681; 
+	vertical-align: middle; 
+	font-family:Arial, Helvetica, sans-serif; 
+	-webkit-border-radius: 4px; 
+	-moz-border-radius: 4px; 
+	border-radius: 4px; 
+	border: 1px solid #8a979e; 
+	padding:4px;
+	background-color:#ffffff;
+}
+
+#govd_form_button {
+	background-color:#ffffff;  /*be sure to change border color for IE 7 and 8 */
+	font-weight:bold;
+	color: #004681 !important; 
+	cursor: pointer; 
+	display: inline-block; 
+	font-size: 14px; 
+	line-height: 18px; 
+	padding-left: 10px; 
+	padding-top: 2px; 
+	padding-bottom: 2px; 
+	padding-right: 10px; 
+	text-align: center; 
+	vertical-align: middle;	
+	border:1px solid #ffffff;\9; /* targets IE8 and below */
+	*border:none;  /* targets IE6 and 7 */
+} 
+
+.govd_close_link {
+	display:none;
+	color:#022945;
+}
+
+.bottom_button_panel {
+	margin-top:15px;
+	background-color:#ffffff;
+	height:25px;
+	padding:10px;
+	padding-left:49px;
+}
+
+.bottom_button_panel button {
+	line-height:16px;
+}
+
+.govd_dismiss_link {cursor:pointer;}
+.govd_ask_later {cursor:pointer;}
+
+</style>
+
+<div id="govd_background">
+  <div id="govd_whitebox">
+    <div id="govd_logo">
+     <!-- <a href="" class="govd_close_link" title="Close overlay and go to site">Skip</a>-->
+       <img src="http://service.govdelivery.com/demos/overlay/USGSA/client_popup_code/logo.jpg" alt="" width="344" height="67px"/></div>
+      <div id="govd_overlay">
+        
+        <p style="color:#004681; padding-bottom:15px; margin:0px; text-align:center; display:block; font-family:Arial, Helvetica, sans-serif; font-size:25px;">Sign up for information <br>
+        from GSA Interact </p>
+       
+        <form target="_blank" action="https://public.govdelivery.com/accounts/USGSA/subscribers/qualify" id="overlay_form">
+          
+          <label for="govd_email_address" style="height:1px;  left:-10000px;  position:absolute;  top:auto;  width: 1px; color:#022945;">Enter Email Address</label>
+          <input type="text" id="govd_email_address" name="email" tabindex="1" value="yourname@email.com" onfocus="this.value=''" />
+          <!--<input id="topic_id" name="topic_id" type="hidden" value="USGSA_2" /> --> 
+          <input id="qsp" type="hidden" value="USGSA_INTERACT" name="qsp">
+          <label for="govd_form_button" style="display:none;">Submit</label>            
+          <input id="govd_form_button" name="commit" type="submit" value="Submit" tabindex="2" />
+        </form>
+        
+    
+          
+     </div>
+    
+    <!-- <div class="bottom_button_panel">
+      <button class="govd_dismiss_link" title="Close overlay and go to site" value="No Thanks"><span style="font-size:12px;">No Thanks</span></button>&nbsp
+      <button class="govd_ask_later" title="Remind me again"><span style="font-size:12px;">Remind me later</span></button>
+    </div> -->   
+  </div>
+</div>
+
+

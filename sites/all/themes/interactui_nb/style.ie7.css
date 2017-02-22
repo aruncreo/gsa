@@ -1,0 +1,96 @@
+/* Created by Artisteer v4.0.0.55648 */
+
+
+.gs-header
+{
+   z-index: 1;
+}
+
+.gs-hmenu>li, .gs-hmenu>li>a
+{
+   display: inline !important;
+   zoom: 1;
+   float: none !important;
+   vertical-align: top;
+}
+
+ul.gs-hmenu>li:first-child {
+   padding-right:0;
+}
+
+ul.gs-hmenu ul{
+}
+
+.gs-content-layout, .gs-content-layout-row, .gs-layout-cell 
+{
+   display: block;
+   zoom: 1;
+}
+.gs-layout-cell
+{
+   position:relative;
+   float: left;
+   clear: right;
+}
+
+
+
+
+
+
+.gs-postheadericons span{
+   zoom: 1;
+}
+.gs-postcontent {
+   height: 1%;
+}
+
+
+
+.gs-sidebar1-bg 
+{
+   position:absolute;
+   z-index:-2;
+   direction: ltr;
+   left:  0;
+   bottom:0;
+   top:0;
+   width: 220px;
+   overflow:hidden;
+   display:block;
+   background-color: #EFEFEF;
+}
+
+
+
+.gs-sidebar2-bg 
+{
+   position:absolute;
+   z-index:-2;
+   direction: ltr;
+   right:  0;
+   bottom:0;
+   top:0;
+   width: 220px;
+   overflow:hidden;
+   display:block;
+   background-color: #EFEFEF;
+}
+
+div#block-views-user-meta-block {
+  width: 300px; 
+}
+
+input#edit-search-block-form--2 {
+  text-align:center; 
+  padding-top: 8px;
+}
+
+.group-banner-title.field-content {
+  position: relative;
+  top: -10px;
+  background-position: 5% 75%;
+}
+
+.gs-sheet{z-index:-1 }
+.expanded ul {z-index:9999 !important}

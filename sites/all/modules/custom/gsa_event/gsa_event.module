@@ -1,0 +1,1238 @@
+<?php
+
+include_once('gsa_event.features.inc');
+ 
+require_once('includes/gsa_event.sync.inc');
+
+/**
+ * Implements hook_menu().
+ */
+function gsa_event_menu() {
+  $items = array();
+  $items['event-registration'] = array(
+    'title' => 'Event registration',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('gsa_event_registration'),
+    'access arguments' => array('register for gsa events'),
+    'type' => MENU_CALLBACK,
+    'file' => 'includes/gsa_event.register.inc',
+  );
+  $items['admin/config/gsa-events'] = array(
+    'title' => 'GSA Events',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('gsa_event_admin_config'),
+    'access arguments' => array('administer gsa events'),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'includes/gsa_event.admin.inc',
+  );
+  $items['admin/config/gsa-events/email-config'] = array(
+    'title' => 'Waitlist email',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('gsa_event_admin_config'),
+    'access arguments' => array('administer gsa events'),
+    'type' => MENU_LOCAL_TASK,
+    'file' => 'includes/gsa_event.admin.inc',
+  );
+   $items['admin/config/gsa-events/notification-config'] = array(
+    'title' => 'Waitlist notification',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('gsa_event_admin_config_notification'),
+    'access arguments' => array('administer gsa events'),
+    'type' => MENU_LOCAL_TASK,
+    'file' => 'includes/gsa_event.admin.inc',
+  );
+  $items['admin/config/gsa-events/threshold-config'] = array(
+    'title' => 'Waitlist threshold',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('gsa_event_admin_config_threshold'),
+    'access arguments' => array('administer gsa events'),
+    'type' => MENU_LOCAL_TASK,
+    'file' => 'includes/gsa_event.admin.inc',
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_permission().
+ */
+function gsa_event_permission() {
+  $permissions = array();
+  $permissions['administer gsa events'] = array(
+    'title' => t('Administer GSA events'),
+  );
+  $permissions['register for gsa events'] = array(
+    'title' => t('Register for GSA events'),
+  );
+  return $permissions;
+}
+
+/**
+ * Implements hook_theme().
+ */
+function gsa_event_theme($existing, $type, $theme, $path) {
+  $items = array();
+  $items['views_view_field__gsa_event_fieldgroups__block_2__field_gsa_attendance_type'] = array(
+    'variables' => array('view' => NULL, 'field' => NULL, 'row' => NULL),
+    'base hook' => 'views_view_field',
+    'path' => $path . '/views',
+    'template' => 'views-view-field--gsa-event-fieldgroups--block-2--field-gsa-attendance-type',
+  );
+  $items['views_view_field__gsa_event_register_confirm'] = array(
+    'variables' => array('view' => NULL, 'field' => NULL, 'row' => NULL),
+    'base hook' => 'views_view_field',
+    'path' => $path . '/views',
+    'template' => 'views-view-field--gsa-event-register-confirm',
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_block_info().
+ */
+function gsa_event_block_info() {
+  $blocks = array();
+  
+  // @todo: These shouldn't use numeric keys
+  $blocks[0] = array(
+    'info' => t('Register for this event'),
+    'cache' => DRUPAL_NO_CACHE,
+  );
+  $blocks[1] = array(
+    'info' => t('View all event details'),
+    'cache' => DRUPAL_NO_CACHE,
+  );
+  
+  // Blocks containing the fieldgroups for the event node
+  if ($groups = field_group_read_groups()) {
+    $node_type = variable_get('gsa_event_node_type', 'gsa_event');
+    if (isset($groups['node'][$node_type]['form'])) {
+      foreach ($groups['node'][$node_type]['form'] as $key => $group) {
+        $blocks[$key] = array(
+          'info' => t('Event info: !group', array('!group' => $group->label)),
+          'cache' => DRUPAL_NO_CACHE,
+        );
+      }
+    }
+  }
+  
+  return $blocks;
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function gsa_event_block_view($delta = '') {
+  if (is_numeric($delta)) {
+    switch ($delta) {
+      case 0:
+        return  _gsa_event_register_block();
+      case 1:
+        return _gsa_event_details_link_block();
+    }
+  }
+  else {
+    return _gsa_event_fieldgroup_block($delta);
+  }
+}
+
+/**
+ * Implements hook_cron().
+ */
+function gsa_event_cron() {
+  // Check if we're auto syncing
+  if ($interval = variable_get('gsa_event_sync_interval', 0)) {
+    // Check if we've passed the interval
+    if (time() > (gsa_event_last_sync() + $interval)) {
+      // Perform a sync
+      gsa_event_sync_period(FALSE);
+    }
+  }
+}
+
+/**
+ * Implements hook_node_view().
+ *
+ * Display information about classes associated with the event.
+ */
+function gsa_event_node_view($node, $view_mode, $langcode) {
+  if ($node->type == variable_get('gsa_event_node_type', 'gsa_event') && $classes = gsa_event_list_classes($node)) {
+    $node->content['gsa-classes'] = array(
+      '#type' => 'item',
+      '#title' => t('Available Classes'),
+      '#markup' => $classes,
+      '#weight' => 100,
+    );
+  }
+}
+
+/**
+ * Implements hook_node_delete().
+ */
+function gsa_event_node_delete($node) {
+  // Just in case someone decided to manually delete one
+  // Yes, this will cause a double-query
+  db_delete('gsa_events')
+    ->condition('nid', $node->nid)
+    ->execute();
+}
+
+/**
+ * Implements hook_views_pre_render().
+ */
+function gsa_event_views_pre_render(&$view) {
+  switch ($view->name) {
+
+    case 'gsa_event_register_confirm':
+
+      // Attach class registration details to the confirmation page
+      $node = node_load($view->result[0]->nid);
+      $class_ids = explode(' ', $view->args[1]);
+      if ($classes_html = gsa_event_list_classes($node, $class_ids)) {
+        $attachment = '<h2>' . format_plural(
+          count($class_ids),
+          'You also registered for the following class:',
+          'You also registered for the following classes:'
+        ) . '</h2>';
+        $attachment .= $classes_html;
+        $view->attachment_after = $attachment;
+      }
+
+      break;
+  }
+}
+
+/**
+ * Implements hook_form_gsa_salesforce_admin_settings_alter().
+ */
+function gsa_event_form_gsa_salesforce_admin_settings_alter(&$form, &$form_state) {
+  // Determine the amount of events in the system
+  $amount = db_select('gsa_events')
+    ->fields('gsa_events', array('sfid'))
+    ->countQuery()
+    ->execute()
+    ->fetchField();
+    
+  // Sync settings
+  $items['sync_settings'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Event syncing settings'),
+    '#collapsed' => FALSE,
+  );
+  $items['sync_settings']['gsa_event_sync_interval'] = array(
+    '#type' => 'select',
+    '#title' => t('How often should events be synced?'),
+    '#description' => t('Salesforce will automatically be checked for changes on every interval chosen above.'),
+    '#options' => array(0 => t('Never')) + drupal_map_assoc(array(900, 1800, 3600, 10800, 21600, 32400, 43200, 86400, 172800, 259200, 604800, 1209600), 'format_interval'),
+    '#default_value' => variable_get('gsa_event_sync_interval', 0),
+  );
+  
+  // Set time offset
+  $items['time_settings'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Timezone handling'),
+    '#collapsed' => FALSE,
+  );
+  $items['time_settings']['gsa_event_hour_offset'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Hour offset'),
+    '#description' => t('Enter the amount of hours in time difference between your current location and the timezone set in Salesforce. (Eg, entering a value of 2, will make the time reduce by two hours)'),
+    '#prefix' => t('Salesforce time:') . ' <i>' . format_date(gsa_event_adjust_time(time()), 'long') . '</i>',
+    '#default_value' => variable_get('gsa_event_hour_offset', 0),
+    '#required' => TRUE,
+    '#size' => 2,
+    '#maxlength' => 2,
+  );
+  
+  // Period sync
+  $items['period_sync'] = array(
+    '#type' => 'fieldset',
+    '#title' => 'Sync events (periodic check)',
+    '#description' => '<strong><i>' . t('There are currently !amount events in the system.', array('!amount' => $amount)) . '</i></strong>',
+    '#collapsed' => FALSE,
+  );
+  $items['period_sync']['period_sync_message'] = array(
+    '#type' => 'item',
+    '#value' => t('This will syncronize all event changes in Salesforce since the last
+      sync took place. If there are no events currently in the system, a full sync should
+      be performed.'
+    ),
+  );
+  $items['period_sync']['period_sync_now'] = array(
+    '#type' => 'submit',
+    '#value' => t('Perform a periodic sync now'),
+    '#submit' => array('gsa_event_sync_period'),
+    '#description' => t('Clicking this will perform a periodic sync with Salesforce. This operation may take a while.'),
+  );
+  
+  // Full sync
+  $items['sync'] = array(
+    '#type' => 'fieldset',
+    '#title' => 'Sync events (full sync)',
+    '#description' => '<strong><i>' . t('There are currently !amount events in the system.', array('!amount' => $amount)) . '</i></strong>',
+    '#collapsed' => FALSE,
+  );
+  $items['sync']['sync-message'] = array(
+    '#type' => 'item',
+    '#value' => t('This will syncronize every single available event in Salesforce.
+      All local items will be updated and items that have been removed from Salesforce
+      will be removed locally. This operation should only be done once after the module
+      is installed, or if the system is very outdated. The syncronization process may
+      take a while.'
+    ),
+  );
+  $items['sync']['sync-now'] = array(
+    '#type' => 'submit',
+    '#value' => t('Sync all events now'),
+    '#submit' => array('gsa_event_sync_full'),
+    '#description' => t('Clicking this will perform a full sync with Salesforce. This operation may take a while.'),
+  );
+  
+  // Choose which node type we'll use
+  $types = array();
+  $types = node_type_get_names();
+  
+  $items['node_settings'] = array(
+    '#type' => 'fieldset',
+    '#title' => 'Node settings',
+    '#collapsed' => FALSE,
+  );
+  $items['node_settings']['gsa_event_node_type'] = array(
+    '#type' => 'select',
+    '#title' => t('Event node type'),
+    '#description' => t('Choose which node type will be used to map events in Salesforce.'),
+    '#options' => $types,
+    '#default_value' => variable_get('gsa_event_node_type', 'gsa_event'),
+  );
+  
+  // General registration options
+  $items['registration_settings'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Registration settings'),
+    '#collapsed' => FALSE,
+  );
+  $items['registration_settings']['gsa_event_allow_registration'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Allow site registration on event registration'),
+    '#default_value' => variable_get('gsa_event_allow_registration', 1),
+    '#description' => t('If checked, anonymous users will have the option to create a site account while registering for an event.'),
+  );
+  $items['registration_settings']['gsa_event_close_hours'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Hours prior to event that registration closes'),
+    '#default_value' => variable_get('gsa_event_close_hours', 8),
+    '#description' => t('Specify the number of hours in which registration will close prior to an events start time.'),
+    '#size' => 4,
+    '#maxlength' => 3,
+  );
+  
+  $form = $items + $form;
+}
+
+/**
+ * Implements hook_gsa_event_save().
+ */
+function gsa_event_gsa_event_save($record, $type = NULL) {
+  // Only create nodes for certain types
+  if ($type) {
+    switch (strtolower($type)) {
+      case 'event':
+      case 'customer training':
+        break;
+      default:
+        return;
+    }
+  }
+  gsa_event_save_event($record, $type);
+}
+
+/**
+ * Implements hook_gsa_event_delete().
+ */
+function gsa_event_gsa_event_delete($record, $type = NULL) {
+  // Only delete nodes for certain types
+  if ($type) {
+    switch (strtolower($type)) {
+      case 'event':
+      case 'customer training':
+        break;
+      default:
+        return;
+    }
+  }
+  gsa_event_delete_event($record, $type);
+}
+
+/**
+ * A block which provides a registration button for the given
+ * event
+ */
+function _gsa_event_register_block() {
+  // Make sure we're viewing a node
+  if ($node = menu_get_object('node')) {
+    // Make sure this is a GSA event
+    if ($node && $node->type == variable_get('gsa_event_node_type', 'gsa_event')) {
+      return array('subject' => t('Register'), 'content' => drupal_get_form('gsa_event_registration_button', $node));
+    }
+  }
+}
+
+/**
+ * A block containing a link to the event page for use in the ui-registration context
+ */
+function _gsa_event_details_link_block() {
+  // Get the Salesforce ID from the URL
+  if (!($sfid = $_GET['id'])) {
+    return NULL;
+  }
+  // Make sure we have a node attached to it
+  if (!($event = gsa_event_get_event_by_sfid($sfid))) {
+    return NULL;
+  }
+
+  return array('subject' => NULL, 'content' => l(t('View all event details'), 'node/' . $event->nid));
+}
+
+/**
+ * A block containing the Views "fieldset" data for a given node
+ * based on the Salesforce ID
+ *
+ * This is used to provide event detail on the registration form
+ *
+ * @param $fieldgroup
+ *   The name of the fieldgroup to display
+ * @return
+ *   A block array
+ */
+function _gsa_event_fieldgroup_block($fieldgroup) {
+  // Get the Salesforce ID from the URL
+  if (!($sfid = $_GET['id'])) {
+    return NULL;
+  }
+  
+  // Make sure we have a node attached to it
+  if (!($event = gsa_event_get_event_by_sfid($sfid))) {
+    return NULL;
+  }
+
+  // Load the node associated with this event
+  if (!($node = node_load($event->nid))) {
+    return NULL;
+  }
+
+  // Determine the Views display_id for the fieldgroup
+  switch ($fieldgroup) {
+    case 'group_gsa_event_details':
+      $display_id = 'block';
+      break;
+  
+    case 'group_gsa_event_date':
+      $display_id = 'block_1';
+      break;
+  
+    case 'group_gsa_event_location':
+      $display_id = 'block_2';
+      break;
+  
+    default:
+      return NULL;
+  }
+  
+  // Load the view/display
+  $view = views_get_view('gsa_event_fieldgroups');
+  if (!$view || !$view->access($display_id)) {
+    return NULL;
+  }
+  
+  return array(
+    'content' => $view->preview($display_id, array($event->nid)),
+    'subject' => $view->get_title(),
+  );
+
+}
+
+/**
+ * Save/Update a Salesforce event record
+ *
+ * This handles to the call to map the event to a node
+ *
+ * @param $record
+ *   A Salesforce record object
+ * @param $type
+ *   The event type
+ */
+function gsa_event_save_event($record, $type) {
+  // Cast the event record into an array
+  $record = (array) $record;
+  
+  // Convert single records to an array, if any, since SF decided that
+  // would be too easy
+  if (isset($record['CampaignClasses__r'])) {
+    if (is_object($record['CampaignClasses__r']->records)) {
+      $record['CampaignClasses__r']->records = array($record['CampaignClasses__r']->records);
+    }
+  }
+  
+  // Check if the record has been approved for syncing
+  if (strtolower($record['Sync_Changes__c']) != 'on') {
+    watchdog('gsa_event', 'Skipping Event ID !ID (!type)', array('!ID' => $record['Id'], '!type' => $type));
+    return;
+  }
+  
+  // Check if this event has been mapped to a node yet
+  $nid = 
+    db_select('gsa_events')
+      ->fields('gsa_events', array('nid'))
+      ->condition('sfid', $record['Id'])
+      ->execute()
+      ->fetchField();
+  
+  // Either map to a new node, or update the existing one
+  $node = gsa_event_map_to_node($record, $nid, $type);
+  
+  // Remove old settings, if any
+  db_delete('gsa_events')
+    ->condition('sfid', $record['Id'])
+    ->execute();
+  
+  // Save the new record
+  db_insert('gsa_events')
+    ->fields(array(
+      'sfid' => $record['Id'],
+      'nid' => $node->nid,
+      'data' => serialize($record),
+    ))
+    ->execute();
+  
+  watchdog('gsa_event', 'Event ID !ID has been synced (!type)', array('!ID' => $record['Id'], '!type' => $type));
+}
+
+/**
+ * Delete a Salesforce event record
+ *
+ * This handles deleting the associated node
+ *
+ * @param $record
+ *   A Salesforce record object
+ * @param $type
+ *   The object type
+ */
+function gsa_event_delete_event($record, $type) {
+  // Determine the node ID associated with the record
+  $nid = 
+    db_select('gsa_events')
+      ->fields('gsa_events', array('nid'))
+      ->condition('sfid', $record->Id)
+      ->execute()
+      ->fetchField();
+  
+  // Delete the node, if one
+  if ($nid) {
+    node_delete($nid);
+  }
+  
+  // Remove the record from the database
+  db_delete('gsa_events')
+    ->condition('sfid', $record->Id)
+    ->execute();
+  
+  watchdog('gsa_event', 'Event ID !ID has been deleted', array('!ID' => $record->Id));
+}
+
+/**
+ * Map a Salesforce record to our custom node type
+ * If the node already exists, it will be updated
+ *
+ * Salesforce record fields other than Name and Description
+ * will automatically be mapped to available CCK fields
+ * by the Salesforce record name as follows:
+ *
+ *  field_gsa_%salesforce-field-name%
+ *
+ * @param $record
+ *   A Salesforce record array, not object
+ * @param $nid
+ *   The node ID (Optional).
+ * @param $type
+ *   The machine-name type of event
+ * @return
+ *   The saved node object
+ */
+function gsa_event_map_to_node($record, $nid = 0, $type = NULL) {
+  // Does the node exist already?
+  if (is_numeric($nid)) {
+    // If so, then load it
+    $node = node_load($nid);
+  }
+  else {
+    // If not, the prepare it
+    $node = new stdClass;
+    $node->type = variable_get('gsa_event_node_type', 'gsa_event');
+    $node->language = LANGUAGE_NONE;
+    node_object_prepare($node);
+  }
+  
+  // Add standard node fields
+  $node->title = isset($record['Published_Event_Title__c']) ? strip_tags($record['Published_Event_Title__c']) : strip_tags($record['Name']); // Use strip_tags instead of check_plain() to avoid encoding
+  $node->body = array(
+    LANGUAGE_NONE => array(
+      0 => array(
+        'value' => $record['Detailed_Description_for_Publication__c'],
+        'format' => 'full_html',
+      )
+    )
+  );
+  $node->revision = 0;
+    
+  // Check the event status
+  $status = strtolower($record['Portal_Status__c']);
+  $node->status = 1;
+  if ($status != 'on' && $status != 'yes') {
+    $node->status = 0;
+  }
+  
+  // Correct the key for the external registration URL field
+  if (isset($record['External_Registration_URL__c'])) {
+    $record['external_reg_url'] = $record['External_Registration_URL__c'];
+    unset($record['External_Registration_URL__c']);
+  }
+  
+  // Remove the fields we've used already
+  unset($record['Name']);
+  unset($record['Description']);
+  unset($record['Portal_Status__c']);
+  unset($record['Detailed_Description_for_Publication__c']);
+  
+  // Add custom fields
+  foreach ($record as $key => $value) {
+    // Process classes
+    if ($key == 'CampaignClasses__r') {
+      $i = 0;
+
+      foreach ($value->records as $theClass) {
+        $fields = get_object_vars($theClass);
+
+        if (is_array($fields)) {
+          foreach ($fields as $fieldKey => $fieldValue) {
+            if ($fieldValue != NULL) {
+        
+              // Rename the field to match the node field names
+              switch ($fieldKey) {
+                case 'Id':
+                  $fieldKey = 'Class_SFID';
+                  break;
+            
+                case 'Name':
+                  $fieldKey = 'Class_Session';
+                  break;
+   
+                case 'Instructor_Name__c':
+                  $fieldKey = 'Class_Instructor';
+                  break;
+  
+                case 'Start_Date_Time_Hidden__c':
+                  $fieldKey = 'Class_Start_Date_Time';
+                  break;
+                  
+                case 'CLP__c':
+                  $stem = $fieldKey;
+                  $fieldKey = 'Class_';
+                  $fieldKey .= $stem;
+                  break;
+              }
+  
+              gsa_event_attach_field_to_node($node, $fieldKey, $fieldValue, $i);
+            }
+          }
+        }
+        
+        $i++;
+      }
+    }
+    else {
+      gsa_event_attach_field_to_node($node, $key, $value);
+    }
+  }
+
+  // Instantiate coordinates field
+  gsa_event_attach_field_to_node($node, 'coords'); 
+
+  // Map location data
+  gsa_event_map_to_location($node);
+  
+  
+  // Add/update the node
+  node_save($node);
+  
+  return $node;
+}
+
+/**
+ * Helper function to attach field values to a node
+ *
+ * @param &$node
+ *   A node object
+ * @param $key
+ *   The field key
+ * @param $value
+ *   The field value
+ * @param $index
+ *   The field index
+ * @param $key_prefix
+ *   A prefix to put before all keys, after "field_"
+ * @param $lang
+ *   The field language
+ */
+function gsa_event_attach_field_to_node(&$node, $key, $value, $index = 0, $key_prefix = 'gsa_', $lang = LANGUAGE_NONE) {
+  // Process the key and value
+  gsa_event_preprocess_field($key, $value);
+  // Create a field key
+  $key = 'field_' . $key_prefix . strtolower($key);
+  // Initialize the node field
+  if (!isset($node->$key)) {
+    $node->$key = array();
+  }
+  // Set a reference
+  $field = &$node->$key;
+  // Attach the value
+  $field[$lang][$index]['value'] = $value;
+}
+
+/**
+ * Provide custom changes to field keys and values coming from
+ * Salesforce before they're added to a node
+ *
+ * @param $key
+ *   The Salesforce field name
+ * @param $value
+ *   The data in the Salesforce field
+ */
+function gsa_event_preprocess_field(&$key, &$value) {
+  // Remove custom field identifier ("__c")
+  $key = str_replace('__c', '', $key);
+  
+  // Always filter for XSS
+  $value = filter_xss($value);
+  
+  // @todo: truncate value to 255 length?
+  $value = substr($value, 0, 255);
+  
+  // Field-specific operations
+  switch ($key) {
+    //case 'Class_Start_Date_Time':
+    case 'Start_Date_Time':
+    case 'End_Date_Time':
+      // We need a date format that works with Date.module
+      // YYYY-MM-DDTHH:MM:SS
+      $value = strtotime($value);
+      $day = date('Y-m-d', $value);
+      $time = date('H:i:s', $value);
+      $value = $day . 'T' . $time;
+      break;
+      
+    case 'Event_Website':
+      // Add http:// prefix to Website
+      if (!strstr($value, 'http://') && !strstr($value, 'https://')) {
+        $value = 'http://' . $value;
+      }
+      break;
+  }
+}
+
+/**
+ * Map an events location data to the location module for GMap
+ */
+function gsa_event_map_to_location(&$node) {
+  if (!module_exists('location')) {
+    return;
+  }
+
+  $location = array();
+  
+  foreach ($node as $key => $value) {
+    if (!isset($value[LANGUAGE_NONE])) {
+      continue; 
+    }
+    
+    switch ($key) {
+      case 'field_gsa_coords':
+        // Retrieve coordinates from Mapbox API
+        $mapbox_id = variable_get('leaflet_mapbox_code') . "/";
+        $address = str_replace(' ', '+', $address);
+        $url = "http://api.tiles.mapbox.com/v3/" . $mapbox_id . "geocode/" . $address . ".json";
+        $result = drupal_http_request($url);
+        $data = json_decode($result->data);
+        $lon = $data->results[0][0]->lon;
+        $lat = $data->results[0][0]->lat;
+        $coords = $lon . " " . $lat;
+
+        // Create and attach field to node
+        $key = "coords";
+        $value = 'POINT (' . $coords . ')';
+        gsa_event_attach_field_to_node($node, $key, $value);
+        node_save($node);
+        break;
+      case 'field_gsa_venue':
+        $location['name'] = $value[LANGUAGE_NONE][0]['value'];
+        break;
+      case 'field_gsa_address_1':
+        $location['street'] = $value[LANGUAGE_NONE][0]['value'];
+        //$address = $location['street'] . ' ';
+        break;
+      case 'field_gsa_address_2':
+        $location['additional'] = $value[LANGUAGE_NONE][0]['value'];
+        //$address = $address . $location['additional'] . ' ';
+        break;
+      case 'field_gsa_city':
+        $location['city'] = $value[LANGUAGE_NONE][0]['value'];
+        //$address = $address . $location['city'] . ' ';
+        break;
+      case 'field_gsa_state':
+        module_load_include('inc', 'gsa_salesforce', 'includes/gsa_salesforce.locations');
+        $location['province'] = (strlen($value[LANGUAGE_NONE][0]['value']) == 2) ? gsa_salesforce_get_location_by_abbr($value[LANGUAGE_NONE][0]['value']) : $value[LANGUAGE_NONE][0]['value'];
+        //$address = $address . $location['province'] . ' ';
+        break;
+      case 'field_gsa_zip':
+        $location['postal_code'] = $value[LANGUAGE_NONE][0]['value'];
+        $address = $address . $location['postal_code'] . ' ';
+        break;
+      case 'field_gsa_country':
+        $location['country'] = ($value[LANGUAGE_NONE][0]['value'] == 'United States') ? 'us': $value[LANGUAGE_NONE][0]['value'];
+        //$address = $address . $location['country'] . ' ';
+        break;
+    }
+  }
+  
+  if (!empty($location)) {
+    $node->locations[LANGUAGE_NONE][0] = $location;
+  }
+}
+  
+/**
+ * The form provided at the bottom of event nodes which provides
+ * a button to register for the event
+ */
+function gsa_event_registration_button($form, &$form_state, $event) {
+  $record = gsa_event_get_event_by_node($event->nid);
+  
+  if (!$record) {
+    return $form;
+  }
+  
+  // If the event has an external registration URL, display a link to the site
+  // in place of the registration form button.
+  $event_node = node_load($record->nid);
+  if (isset($event_node->field_gsa_external_reg_url[LANGUAGE_NONE][0]['safe_value'])) {
+    $url = $event_node->field_gsa_external_reg_url[LANGUAGE_NONE][0]['safe_value'];
+    $options = array(
+      'attributes' => array(
+        'class' => array('gs-button'),
+        'target' => '_blank',
+      ),
+    );
+    $form['external-reg'] = array(
+      '#markup' => l('Register for this event', $url, $options),
+    );
+    return $form;
+  }
+
+  // Get event capacity
+  $eventId = $record->data['Id'];
+  $event_capacity = gsa_event_capacity($eventId);
+
+  // Check that the event is still open for registration
+  // and that the user has permission to register
+  // Added: Check to see if the event capacity has been reached
+  // Added: Check to see if the Salesforce connection is enabled.
+  if (!user_access('register for gsa events') || !gsa_event_is_open($record)) {
+    return array(
+      'reg-closed' => array(
+        '#type' => 'item',
+        '#markup' => '<div class="messages warning">' . t('Registration is not available for this event') . '</div>',
+      )
+    );
+  } else if (isset($event_capacity) && $event_capacity >= variable_get('gsa_event_threshold', 100)){
+
+    $form['reg-unavailable'] = array(
+      '#type' => 'item',
+      '#markup' => '<div class="messages warning">' . t(token_replace(variable_get('gsa_event_notification_capacity_warning'))) . '</div>',
+    );
+
+    $form['gsa-register-button'] = array(
+      '#type' => 'submit',
+      '#value' => t(variable_get('gsa_event_notification_capacity_register_button', 'Register for this event')),
+    );
+  
+    $form['salesforce-id'] = array(
+      '#type' => 'value',
+      '#value' => $record->sfid,
+    );
+
+    return $form;
+  
+  } else if (variable_get('gsa_salesforce_enabled', 0) == 0) {
+    return array(
+      'reg-unavailable' => array(
+        '#type' => 'item',
+        '#markup' => '<div class="messages warning">' . t('The registration system is temporarily unavailable.') . '</div>',
+      )
+    );
+  }
+  
+  $form['gsa-register-button'] = array(
+    '#type' => 'submit',
+    '#value' => t('Register for this event'),
+  );
+  
+  $form['salesforce-id'] = array(
+    '#type' => 'value',
+    '#value' => $record->sfid,
+  );
+        
+  return $form;
+}
+
+/**
+ * Drupal mail function to send a customized email to event owner
+ * when a user has been added to the waitlist
+ */
+function gsa_event_mail($from, $to, $subject, $message) {
+  
+  $my_module = 'gsa_event';
+  $my_mail_token = microtime();
+  $message = array(
+    'id' => $my_module . '_' . $my_mail_token,
+    'to' => $to,
+    'subject' => $subject,
+    'body' => array($message),
+    'headers' => array(
+      'From' => $from, 
+      'Sender' => $from, 
+      'Return-Path' => $from,
+    ),
+  );
+  $system = drupal_mail_system($my_module, $my_mail_token);
+  $message = $system->format($message);
+  if ($system->mail($message)) {
+    return TRUE;
+  }
+  else {
+    return FALSE;
+  }
+}
+
+/**
+ * Submit handler for the "click here to register" form
+ */
+function gsa_event_registration_button_submit(&$form, $form_state) {
+  // Redirect to the registration form with the salesforce ID as query
+  drupal_goto('event-registration', array('query' => array('id' => $form_state['values']['salesforce-id'])));
+}
+
+/**
+ * Determine if an event is still open for registration
+ *
+ * @param $event
+ *   An event object
+ * @return
+ *   TRUE if the event is open for registration, otherwise false
+ */
+function gsa_event_is_open($event) {
+  // Get the start date
+  $end = strtotime($event->data['Start_Date_Time__c']);
+
+  // See if registration time cutoff has been met
+  $default = 8;
+  $hours = variable_get('gsa_event_close_hours', $default); 
+  // Ensure that this value is numeric, if not, use default
+  $hours = is_numeric($hours) ? $hours : $default;
+  if (time() > ($end - ($hours * 3600))) {
+    return FALSE;
+  }
+  
+  // Check the event status
+  $customer_registration = $event->data['Customer_Registration__c'];
+  $status = strtolower($event->data['Portal_Status__c']);
+  if (($status != 'on' && $status != 'yes') || $customer_registration != TRUE) {
+    return FALSE;
+  }
+
+  return TRUE;
+}
+
+/**
+ * Return the event record attached to a certain node
+ *
+ * @param $node
+ *   A node object or node ID
+ * @return
+ *   The event object associated with that node, or FALSE if none
+ */
+function gsa_event_get_event_by_node($node) {
+  gsa_event_include_toolkit();
+  
+  if (is_numeric($node)) {
+    $nid = $node;
+  }
+  else if (is_object($node)) {
+    $nid = $node->nid;
+  }
+  
+  if ($nid) {
+    $record = 
+      db_select('gsa_events')
+        ->fields('gsa_events')
+        ->condition('nid', $nid)
+        ->execute()
+        ->fetchObject();
+        
+    if ($record) {
+      $record->data = unserialize($record->data);
+      return $record;
+    }
+  }
+  
+  return FALSE;
+}
+
+/**
+ * Return the event record attached to a Salesforce ID
+ *
+ * @param $sfid
+ *   A Salesforce object ID
+ * @return
+ *   The event object associated with that ID, or FALSE if none
+ */
+function gsa_event_get_event_by_sfid($sfid) {
+  gsa_event_include_toolkit();
+  
+  $record = 
+    db_select('gsa_events')
+      ->fields('gsa_events')
+      ->condition('sfid', $sfid)
+      ->execute()
+      ->fetchObject();
+      
+  if ($record) {
+    $record->data = unserialize($record->data);
+    return $record;
+  }
+  return FALSE;
+}
+
+/**
+ * Return the current time with set-hour offset
+ */
+function gsa_event_current_time() {
+  return gsa_event_adjust_time(time());
+}
+
+/**
+ * Adjust the time based on hour offset
+ *
+ * @param $time
+ *   A timestamp
+ * @return
+ *   An adjusted timestamp
+ */
+function gsa_event_adjust_time($time) {
+  return $time - (variable_get('gsa_event_hour_offset', 0) * 3600);
+}
+
+/**
+ * Include the Salesforce toolkit
+ * 
+ * It's neeeded to load SObjects which are saved in the database
+ */
+function gsa_event_include_toolkit() {
+  static $included = FALSE;
+  if ($included == FALSE) {
+    require_once DRUPAL_ROOT . '/' . SALESFORCE_DIR_SOAPCLIENT . '/SforceBaseClient.php';
+    $include = TRUE;
+  }
+}
+
+/**
+ * Return a list of class-related field names and the labels to
+ * use for output.
+ */
+function gsa_event_node_class_fields() {
+  return array(
+    'field_gsa_class_name' => 'Name',
+    'field_gsa_class_instructor' => 'Instructor',
+    'field_gsa_class_clp' => 'CLP Credits',
+    'field_gsa_class_start_date_time' => 'Start Time',
+    'field_gsa_class_session' => 'Session',
+  );
+}
+
+/**
+ * Return a formatted list of classes associated with a training event.
+ *
+ * @param $node
+ *   A gsa_event node
+ * @param $classes
+ *   An array of SFIDs to include. If empty, all classes will be printed.
+ * @return
+ *   HTML output
+ */
+function gsa_event_list_classes($node, $classes = NULL) {
+
+
+  if (!isset($node->field_gsa_class_sfid) || empty($node->field_gsa_class_sfid) || $classes == 'none') return NULL;
+
+
+  // Get the SFIDs of the event classes into an array
+  foreach ($node->field_gsa_class_sfid[LANGUAGE_NONE] as $sfid_field) {
+    $event_classes[] = $sfid_field['value'];
+  }
+
+  for ($i = 0; $i < count($event_classes); $i++) {
+    if (!$classes || in_array($event_classes[$i], $classes)) { 
+      $output .= '<div class="gsa-event-class-row">';
+      foreach (gsa_event_node_class_fields() as $field => $label) {
+         $css_field = str_replace('_', '-', $field);
+         $value = check_plain($node->{$field}[LANGUAGE_NONE][$i]['value']);
+         $output .= '<div class="gsa-event-class-field">';
+         $output .= "<span class=\"gsa-event-class-field-label {$css_field}\">{$label}: </span>";
+         $output .= "<span class=\"gsa-event-class-field-value {$css_field}\">{$value}</span>";
+         $output .= '</div>';
+      }
+      $output .= '</div>';
+    }
+  }
+  return $output;
+}
+
+/**
+ * Returns the percentage value of the event capacity
+ * provided the event's ID
+ */
+function gsa_event_capacity($eventId) {
+
+  // Connect to Salesforce
+  $op = NULL;
+  if (!($sf = gsa_salesforce_connect($op))) {
+    return FALSE;
+  }
+
+  // Build query to get the event capacity
+  $query = "SELECT Campaign_Percentage_Full__c from Campaign WHERE Id = '" . $eventId . "'";
+  $event_capacity_dump = $sf->client->query($query);
+  $sObject = new SObject($event_capacity_dump->records[0]);
+  $event_capacity = $sObject->Campaign_Percentage_Full__c;
+  
+  return $event_capacity;
+}
+
+/**
+ * Returns the trimmed email address for a given event
+ * provided the event owners ID
+ */
+function gsa_event_owner_email($ownerId) {
+
+  // Connect to Salesforce
+  $op = NULL;
+  if (!($sf = gsa_salesforce_connect($op))) {
+    return FALSE;
+  }
+
+  // Build query to get the event owner's email
+  $query = "SELECT Email from User WHERE Id = '" . $ownerId . "'";
+  $email_dump = $sf->client->query($query);
+  $sObject = new SObject($email_dump->records[0]);
+  $email = $sObject->Email;
+  
+  return $email;
+}
+
+/**
+ * Implements hook_token_info()
+ * Create tokens for the GSA Event configuration pages
+ */
+function gsa_event_token_info() {
+
+  $type = array(
+    'name' => t('GSA Events'),
+    'description' => t('Tokens related to GSA Events'),
+    'needs_data' => 'gsa_event',
+  );
+  
+  $gsa_event['event_id'] = array(
+    'name' => t('Event ID'),
+    'description' => t("The Salesforce ID of the event.")
+  );
+  
+  $gsa_event['event_name'] = array(
+    'name' => t('Event name'),
+    'description' => t("The name of the event.")
+  );
+  
+  $gsa_event['event_mail_to'] = array(
+    'name' => t('Event owner email'),
+    'description' => t("The email address of the event owner.")
+  );
+  
+  $gsa_event['event_user_waitlist_id'] = array(
+    'name' => t('Event user waitlist ID'),
+    'description' => t("The waitlist ID for the user")
+  );
+
+  return array(
+    'types' => array('gsa_event' => $type),
+    'tokens' => array('gsa_event' => $gsa_event),
+  );
+
+}
+
+
+/**
+ * Implements hook_tokens() 
+ * Provide tokens for the GSA Event configuration pages
+ */
+function gsa_event_tokens($type, $tokens, array $data = array(), array $options = array()) {
+  global $user;
+  $replacements = array();
+  
+  if (isset($data['gsa_event']) && !empty($data['gsa_event']->sfid)) {
+
+    if ($type == 'gsa_event'){
+      foreach ($tokens as $name => $original) {
+        switch ($name) {
+          case 'event_id': 
+            $replacements[$original] = $data['gsa_event']->sfid;
+            break;
+          case 'event_name': 
+            $replacements[$original] = $data['gsa_event']->data['Name'];
+            break;
+          case 'event_mail_to': 
+            $replacements[$original] = gsa_event_owner_email($data['gsa_event']->data['OwnerId']);
+            break;
+          case 'event_user_waitlist_id': 
+            $replacements[$original] = gsa_event_get_user_waitlist_id($data['gsa_event']->sfid, $user->uid);
+            break;
+        }
+      }
+    }
+    
+    return $replacements;
+
+  }
+}
+
+/**
+* Retrieve the waitlist ID of a user
+* @param $event_id
+*  The event ID required for associating the waitlist ID to an event
+* @param $user_id
+*  The user ID required for associating the waitlist ID to a user
+*/
+function gsa_event_get_user_waitlist_id($event_id,$user_id){
+  
+  $user_waitlist_array = variable_get('gsa_event_waitlist');
+
+  foreach($user_waitlist_array as $user_waitlist){
+    if($user_waitlist['event_id'] == $event_id && $user_waitlist['user_id'] == $user_id){
+      return $user_waitlist['waitlist_id'];
+    }
+  }
+}

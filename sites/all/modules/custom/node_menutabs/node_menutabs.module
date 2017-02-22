@@ -1,0 +1,132 @@
+<?php
+
+/**
+ * Implements hook_menu_alter().
+ */
+function node_menutabs_menu_alter(&$items) {
+  $entries = db_select('node_menutabs', 'n')
+  ->fields('n')
+  ->execute();
+  
+  while ($item = $entries->fetchAssoc()) {
+    $items[$item['path']] = array(
+      'title' => $item['title'],
+      'page callback' => 'node_menutabs_page_view',
+      'page arguments' => array((string) $item['nid']),
+      'access arguments' => array('access content'),
+      'type' => MENU_LOCAL_TASK,
+      'weight' => $item['weight'],
+    );
+  }
+}
+
+/**
+ * Implements hook_form_alter().
+ */
+function node_menutabs_form_alter(&$form, &$form_state, $form_id) {
+  if (!empty($form['#node_edit_form']) && user_access('administer node menutabs')) {
+
+    $entries = db_select('node_menutabs', 'n')
+    ->fields('n')
+    ->condition('nid', $form['nid']['#value'], '=')
+    ->execute()
+    ->fetchAssoc();
+    
+    if ($form['nid']['#value'] && count($entries)) {
+      $tab = $entries;
+    } else {
+      $tab = FALSE;
+    }
+    
+    $form['node_menutabs'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Node menu tab'),
+      '#collapsible' => TRUE,
+      '#collapsed' => TRUE,
+      '#group' => 'additional_settings',
+    );
+
+    $form['node_menutabs']['#tree'] = TRUE;
+
+    $form['node_menutabs']['node_menutab_delete'] = array(
+      '#type' => 'checkbox',
+      '#title' => 'Delete this menu item',
+    );
+    $form['node_menutabs']['node_menutab_title'] = array(
+      '#type' => 'textfield',
+      '#title' => 'Menu item title',
+      '#size' => 40,
+      '#default_value' => $tab ? $tab['title']: '',
+    ); 
+    $form['node_menutabs']['node_menutab_path'] = array(
+      '#type' => 'textfield',
+      '#title' => 'Menu path',
+      '#size' => 40,
+      '#default_value' => $tab ? $tab['path']: '',
+    ); 
+    $form['node_menutabs']['node_menutab_weight'] = array(
+      '#type' => 'textfield',
+      '#title' => 'Weight',
+      '#size' => 4,
+      '#default_value' => $tab ? $tab['weight']: '',
+    );
+  }
+}
+
+/**
+ * Implements hook_node_delete().
+ */
+function node_menutabs_node_delete($node) {
+  node_menutabs_delete_tab($node->nid);
+}
+
+/**
+ * Implements hook_node_validate().
+ */
+function node_menutabs_node_validate($node, $form, &$form_state) {
+  if ($form_fields = $form_state['values']['node_menutabs']) {
+    if ($form_fields['node_menutab_delete'] == 1) {
+      node_menutabs_delete_tab($node->nid);
+      menu_rebuild();
+      return;
+    } else if ($form_fields['node_menutab_title'] != '' && $form_fields['node_menutab_path'] != '') {
+      node_menutabs_delete_tab($node->nid);
+      db_insert('node_menutabs')
+      ->fields(array(
+          'nid' => $node->nid,
+          'path' => $form_fields['node_menutab_path'],
+          'title' => $form_fields['node_menutab_title'],
+          'weight' => $form_fields['node_menutab_weight'],
+        ))
+      ->execute();
+      menu_rebuild();
+    }
+  }
+}
+
+/**
+ * Implementation of hook_permission().
+ */
+function node_menutabs_permission() {
+  return array(
+    'administer node menutabs' => array(
+      'title' => 'Administer node menutabs',
+    ),
+  );
+}
+
+/**
+ * Wrapper for page callback to return a node.
+ */
+function node_menutabs_page_view($nid) {
+  return node_page_view(node_load($nid));
+}
+
+/**
+ * Delete a node's menu tab.
+ */
+function node_menutabs_delete_tab($nid) {
+  db_delete('node_menutabs')
+  ->condition('nid', $nid, '=')
+  ->execute();  
+}

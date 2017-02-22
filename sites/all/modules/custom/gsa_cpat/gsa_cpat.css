@@ -1,0 +1,61 @@
+
+
+.group-context-group-21 .twocol-30-70 .panel-panel.panel-col-last{
+width:100%;
+}
+.group-context-group-21 .view-gsa-og-content-tracker .views-row .views-field-title{
+width:607px;
+}
+.group-context-group-21 .view-gsa-og-content-tracker .views-row .views-field-body{
+width: 90%;
+}
+.group-context-group-21 #group-sub-menu ul li{
+padding: 0 9px 0 5px;
+}
+
+.group-context-group-21 .gsa_cpat .field-label{
+width:192px;
+line-height:24px;
+}
+.group-context-group-21 .gsa_cpat .field-items{
+width:500px;
+}
+
+
+.view-cpat-opportunities  tr.odd {
+    background-color: transparent;
+}
+.view-cpat-opportunities  tr.even {
+    background-color: #eee;
+}
+.view-cpat-opportunities td.active{
+background-color: none;
+}
+.view-cpat-opportunities table th {
+    background: none repeat scroll 0 0 #e1e2dc;
+    border-color: #bebfb9;
+    border-style: solid;
+    border-width: 1px;
+    font-weight: normal;
+    padding: 3px 10px;
+	line-height: 100%;
+    text-transform: uppercase;
+}
+
+.view-cpat-opportunities th.active img{
+margin: 0;
+}
+
+
+.view-cpat-opportunities .views-table th{font:normal 14px/18px Arial, Helvetica, sans-serif; color:#59595b;text-transform: capitalize; border-left:none; border-right:none; border-top:none;font-weight:bold;padding: 7px 0 7px 8px !important;}
+.view-cpat-opportunities .views-table th a{font:normal 14px/18px Arial, Helvetica, sans-serif; color:#59595b;text-transform: capitalize;border-left:none; border-right:none; border-top:none;font-weight:bold;}
+.view-cpat-opportunities .views-table th{padding:10px; background-color:#efefef; border-bottom:#bcbec0 5px solid;}
+.view-cpat-opportunities .views-table td{padding:10px; background: none repeat scroll 0 0 transparent;}
+.view-cpat-opportunities .views-table .views-field-changed{font-style:italic;}
+.view-cpat-opportunities .views-table td a{color:#008ab9; text-decoration:none;}
+.view-cpat-opportunities .views-table tr.alt td{background-color:#efefef;}
+.view-cpat-messages th{text-align:left !important;}
+.view-cpat-messages th{padding:0 !important;}
+.view-cpat-messages th img{margin:0;}
+
+

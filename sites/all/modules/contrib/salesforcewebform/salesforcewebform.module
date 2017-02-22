@@ -1,0 +1,575 @@
+<?php
+
+
+ini_set("soap.wsdl_cache_enabled", "0");
+
+/**
+ * Implements hook_webform_submission_insert().
+ * Grab the submission of the webform and process it.
+ * @param $node
+ * @param $submission
+ */
+function salesforcewebform_webform_submission_presave($node, $submission) {
+  //Only check the webform if the node is set to process into SF
+  if ($node->use_salesforce) {
+    $comps = $node->webform['components'];
+
+    //Loop through and grab every one that corresponds to a SF field key
+    module_load_include('inc', 'salesforcewebform', 'salesforcewebform_fields');
+    $object_typecode = ($node->salesforce_object) ? $node->salesforce_object : 'l';
+    $sffields = array_keys(array_change_key_case(salesforcewebform_available_fields($object_typecode)));
+    $compmap = array();
+    foreach ($submission->data as $subkey => $subinfo) {
+      if (in_array($comps[$subkey]['form_key'], $sffields, TRUE)) {
+        //This is a SF-related field.  Mark it for display.
+        $compmap[$subkey] = $comps[$subkey]['form_key'];
+      }
+    }
+    //Send the node, webform submission, and components to the processing function.
+    salesforcewebform_process_data($node, $submission, $compmap);
+  }
+}
+
+/**
+ * Allow for editing webforms with Salesforce connection information and modifying the
+ * each webform to post to Salesforce.
+ * @param $form
+ * @param $form_state
+ * @param $form_id
+ */
+function salesforcewebform_form_alter(&$form, &$form_state, $form_id) {
+  if (array_key_exists('nid', $form)) {
+    $node = node_load($form['nid']['#value']);
+  }
+  else {
+    $node = NULL;
+  }
+
+  //Make the SalesforceWebform Fields module available
+  module_load_include('inc', 'salesforcewebform', 'salesforcewebform_fields');
+
+  // handle webform client forms (instances of webforms that are submitted)
+  if (!empty($node->webform) && $form_id == 'webform_configure_form') {
+    // handle editing of webform nodes
+
+    /* Collapse the email info on the page assuming that it is going to be a Salesforce form */
+    $form['mailsettings']['#collapsed'] = TRUE;
+
+    /* Start Salesforce Settings Form */
+    $salesforce_form['salesforcesettings'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Salesforce Settings'),
+      '#collapsible' => TRUE,
+      '#collapsed' => FALSE,
+      '#weight' => -2,
+    );
+
+    $salesforce_form['salesforcesettings']['use_salesforce'] = array(
+      '#type' => 'radios',
+      '#title' => t('Submit to Salesforce'),
+      '#options' => array(
+        1 => t('Yes'),
+        0 => t('No'),
+      ),
+      '#description' => t('If yes, the form will be sent via SOAP to Salesforce.  Make sure you have specified the username & password in the !sflink first.', array('!sflink' => l('Salesforce Webform settings', 'admin/config/development/salesforcewebform'))),
+      '#default_value' => (isset($node->use_salesforce)) ? $node->use_salesforce : 0,
+    );
+
+    $salesforce_form['salesforcesettings']['salesforce_object'] = array(
+      '#type' => 'select',
+      '#title' => t('Object Type'),
+      '#options' => array(
+        'l' => t('Lead'),
+        'c' => t('Contact'),
+        'a' => t('Account'),
+        'p' => t('Person Account'),
+        'm' => t('Account + Contact'),
+      ),
+      '#description' => t('Select which object type to submit to.'),
+      '#default_value' => (isset($node->salesforce_object)) ? $node->salesforce_object : 'l',
+    );
+    /* End Salesforce settings form */
+    $form['#submit'][] = 'salesforcewebform_webform_form_submit';
+    // integrate the Salesforce form into the form
+    $pos = array_search('mailsettings', array_keys($form)) + 1;
+    $form = array_merge(array_slice($form, 0, $pos), $salesforce_form, array_slice($form, $pos));
+
+  }
+
+  elseif ($form_id == 'webform_components_form') {
+    if (isset($node->use_salesforce)) {
+      if ($node->use_salesforce == 1) {
+        $object_typecode = ($node->salesforce_object) ? $node->salesforce_object : 'l';
+        foreach (salesforcewebform_required_fields($object_typecode) as $key => $field) {
+          $missing = TRUE;
+          foreach ($node->webform['components'] as $component) {
+            if ($component['form_key'] == strtolower($field->name)) {
+              $missing = FALSE;
+            }
+          }
+          if ($missing === TRUE) {
+            drupal_set_message(t('Missing required field: @field', array('@field' => check_plain($field->label))), 'error');
+          }
+        }
+      }
+    }
+  }
+
+  // handle editing fields on the webform
+  elseif ($form_id == 'webform_component_edit_form') {
+    //The node is contained in $form['#parameters'][2]
+    // if the user has specified the Salesforce action, then we will be posting the form to Salesforce
+    if ( isset($node->use_salesforce) && $node->use_salesforce == 1 ) {
+      //Get the object type code; default to lead if not set.
+      $object_typecode = ($node->salesforce_object) ? $node->salesforce_object : "l";
+      $sfwaf_array = array();
+
+      foreach (salesforcewebform_available_fields($object_typecode) as $sfwafkey => $sfwafvalue) {
+        if (!is_array($sfwafvalue)) {
+          $sfwafkey = strtolower($sfwafkey);
+          $sfwaf_array[$sfwafkey] = $sfwafvalue;
+        }
+        else {
+          $subarray = array();
+          foreach ($sfwafvalue as $subkey => $subvalue) {
+            $subkey = strtolower($subkey);
+            $subarray[$subkey] = $subvalue;
+          }
+          $sfwaf_array[$sfwafkey] = $subarray;
+        }
+      }
+
+      //Obtain the list of all possible fields from the API; then sort them alphabetically.
+      $valid_fields = $sfwaf_array;
+      asort($valid_fields);
+
+      $new_form_key = array(
+        '#type' => 'select',
+        '#title' => t('Salesforce Field Key'),
+        '#multiple' => FALSE,
+        '#options' => $valid_fields,
+        '#description' => t('Select a Salesforce field that this form field will map to.  If you switch the form to an email for this will be used as the machine readable key.'),
+        '#weight' => $form['form_key']['#weight'],
+        '#default_value' => empty($form['form_key']['#default_value']) ? '' : $form['form_key']['#default_value'],
+      );
+      $form['form_key'] = $new_form_key;
+      $form['#collapsed'] = FALSE;
+      array_unshift($form['#submit'], 'salesforcewebform_form_component_submit');
+    }
+  }
+}
+
+function salesforcewebform_webform_form_submit($form, &$form_state) {
+  $nid = $form_state['complete form']['nid']['#value'];
+  $node = node_load($nid);
+  $node->use_salesforce = $form_state['complete form']['salesforcesettings']['use_salesforce']['#value'];
+  $node->salesforce_object = $form_state['complete form']['salesforcesettings']['salesforce_object']['#value'];
+  node_save($node);
+}
+/**
+ * Intercept webform_component_edit_form and replace the component form_key with the salesforcewebform
+ * component form_key (if only its not empty)
+ * @param array $form
+ * @param array $form_state
+ */
+function salesforcewebform_form_component_submit(&$form, &$form_state) {
+  if (!empty($form_state['values']['advanced']['form_key'])) {
+    $form_state['values']['form_key'] = $form_state['values']['advanced']['form_key'];
+  }
+}
+
+function salesforcewebform_node_insert($node) {
+  module_load_all_includes('webform');
+  $webform_node_types = webform_variable_get('webform_node_types');
+  if (in_array($node->type, $webform_node_types)) {
+    if ( isset($node->use_salesforce) ) {
+      _salesforcewebform_node_uses_salesforce($node);
+    }
+  }
+}
+
+function salesforcewebform_node_update($node) {
+  module_load_all_includes('webform');
+  $webform_node_types = webform_variable_get('webform_node_types');
+  if (in_array($node->type, $webform_node_types)) {
+    if ( isset($node->use_salesforce) ) {
+      _salesforcewebform_node_uses_salesforce($node);
+    }
+  }
+}
+
+function salesforcewebform_node_delete($node) {
+  module_load_all_includes('webform');
+  $webform_node_types = webform_variable_get('webform_node_types');
+  if (in_array($node->type, $webform_node_types)) {
+    if ( isset($node->use_salesforce) ) {
+  $result = db_delete('salesforcewebform')
+    ->condition('nid', $node->nid)
+    ->execute();
+    }
+  }
+}
+
+function salesforcewebform_node_load($nodes, $types) {
+  $nids = array();
+  foreach ($nodes as $node) {
+    $nids[] = $node->nid;
+  }
+
+  module_load_all_includes('webform');
+  $webform_node_types = webform_variable_get('webform_node_types');
+  //First, check to see if any of the types are the webform types to save time.
+  $tmatch = FALSE;
+  foreach ($types as $type) {
+    if (in_array($type, $webform_node_types)) {
+        $tmatch = TRUE;
+    }
+  }
+  if ($tmatch === TRUE) {
+    $result = db_select('salesforcewebform', 's')
+      ->fields('s', array(
+        'nid',
+        'active',
+        'objecttype',
+        ))
+      ->where('s.nid IN (:nids)', array(':nids' => $nids))
+      ->execute();
+    foreach ($result as $record) {
+      $nodes[$record->nid]->use_salesforce = ($record->active == '1') ? TRUE : FALSE;
+      $nodes[$record->nid]->salesforce_object = ($record->active == '1') ? $record->objecttype : NULL;
+    }
+  }
+}
+
+/*
+ * Store the node ID and object type for nodes that use salesforce submission.
+ */
+function _salesforcewebform_node_uses_salesforce($node) {
+  // store the Salesforce fields
+  $result = db_delete('salesforcewebform')
+    ->condition('nid', $node->nid)
+    ->execute();
+  $result = $id = db_insert('salesforcewebform')
+    ->fields(array(
+    'nid' => $node->nid,
+    'active' => $node->use_salesforce,
+    'objecttype' => $node->salesforce_object,
+  ))
+    ->execute();
+}
+
+/**
+ * Add menu item for administering the module.
+ * @return array
+ */
+function salesforcewebform_menu() {
+  $items['admin/config/development/salesforcewebform'] = array(
+    'title' => 'Salesforce Webform',
+    'position' => 'left',
+    'weight' => -100,
+    'description' => 'Configure Salesforce webform integration',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('salesforcewebform_admin_settings'),
+    'access arguments' => array('administer site configuration'),
+  );
+  return $items;
+}
+
+/**
+ * Implementation of hook_admin_settings
+ * @param $form
+ * @param $form_state
+ * @return array
+ */
+function salesforcewebform_admin_settings($form, &$form_state) {
+  $bpath = (base_path() != "/") ? base_path() : NULL;
+
+  $form['salesforcewebform_toolkit_path'] = array(
+    '#type' => 'textfield',
+    '#size' => 80,
+    '#title' => t('Path to Salesforce PHP Toolkit'),
+    '#default_value' => variable_get('salesforcewebform_toolkit_path', $bpath . drupal_get_path('module', 'salesforcewebform') . "/includes"),
+    '#description' => t('Enter the path to the Salesforce PHP Toolkit, which must be downloaded separately from ' . l('the Salesforce site', 'http://wiki.apexdevnet.com/index.php/Web_Services_API#PHP') . '.  Enter the absolute path to the Salesforce Webform /includes folder.'),
+    '#maxlength' => 255,
+    '#weight' => -1,
+  );
+
+  $form['login']['salesforcewebform_user'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Salesforce User'),
+    '#description' => t('The user on the Salesforce System that will post the data to Salesforce.'),
+  );
+
+  $form['login']['salesforcewebform_pw'] = array(
+    '#type' => 'password',
+    '#title' => t('Salesforce Password'),
+    '#description' => t('The password of the user on the Salesforce System the form uses to connect.  Note: the password must be entered as mypasswordXXXXXXXXX, where XXXXXXXXX is your API Security Token from Salesforce.  Additionally, your password will not be displayed here once it is entered, for security purposes.  If you need to change it, please re-enter it.'),
+  );
+  $form['login']['salesforcewebform_change_login'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Change Login Information'),
+    '#description' => t('Check this to override the current login information with the entered values.'),
+  );
+
+  return system_settings_form($form);
+}
+
+
+/**
+ * Process a webform submission into Salesforce
+ * @param $node
+ * @param $submission
+ * @param $compmap
+ */
+function salesforcewebform_process_data($node, $submission, $compmap) {
+  $object_typecode = ($node->salesforce_object) ? $node->salesforce_object : "l";
+  $multiple_objects = FALSE;
+  switch ($object_typecode) {
+    case "c":
+      $object_type = "Contact";
+      break;
+    case "p":
+      $object_type = "PAccount";
+      break;
+    case "a":
+      $object_type = "Account";
+      break;
+    case "m":
+      $object_type = "AccountM";
+      $multiple_objects = TRUE;
+      break;
+    case "l":
+      default:
+      $object_type = "Lead";
+      break;
+  }
+
+
+  //Get the path to the Toolkit, set in the options on install.
+  $toolkit_path = variable_get('salesforcewebform_toolkit_path', drupal_get_path('module', 'salesforcewebform') . "/includes");
+
+  //Ok, now use SOAP to send the information to Salesforce
+  require_once(DRUPAL_ROOT . '/' . $toolkit_path . '/soapclient/SforcePartnerClient.php');
+  require_once(DRUPAL_ROOT . '/' . $toolkit_path . '/soapclient/SforceHeaderOptions.php');
+  module_load_include('inc', 'salesforcewebform', '/salesforcewebform_fields');
+
+  $all_fields = array();
+  $master_fields = array_merge(salesforcewebform_available_fields($object_typecode), salesforcewebform_load_custom_fields(NULL));
+
+  //Determine which field has the WebformSID key
+  $sidkey = array_search("webformsid__c", $compmap);
+  if ($sidkey === FALSE) {
+    //Something is wrong, because there's no SID field
+  }
+
+  //Assign an SID if one is not already set.
+  $sid = empty($submission->data[$sidkey]['value'][0]) ? _salesforcewebform_generate_sid() : $submission->data[$sidkey]['value'][0];
+  $all_fields['WebformSID__c'] = empty($submission->data[$sidkey]['value'][0]) ? $node->nid . "-" . $sid : $submission->data[$sidkey]['value'][0];
+  if (empty($submission->data[$sidkey]['value'][0])) {
+    $submission->data[$sidkey]['value'][0] = $all_fields['WebformSID__c'];
+  }
+  //Convert the component map to SF uppercase
+  foreach ($compmap as $compkey => &$compfield) {
+    foreach ($master_fields as $mkey => $mvalue) {
+      if (strtolower($mvalue) == $compfield) {
+        $compfield = $mvalue;
+      }
+    }
+  }
+  //Take the submission data and put it into the format of SFFieldName=>Value; if multiple values are set, string them together.
+  foreach ($submission->data as $fkey => $fvalue) {
+    if (isset($compmap[$fkey]) && $compmap[$fkey] != "webformsid__c") {
+      $sffields = salesforcewebform_fields_salesforcewebform_fields($object_typecode);
+      if ((in_array($compmap[$fkey], array_keys(array_change_key_case($sffields)))  && !is_numeric($compmap[$fkey])) && isset($fvalue['value'][0])) {
+        if (count($fvalue['value']) == 1) {
+          $all_fields[$compmap[$fkey]] = htmlspecialchars(stripslashes(strip_tags($fvalue['value'][0])));
+        }
+        else {
+          $fsubs = "";
+          foreach ($fvalue['value'] as $subkey => $subvalue) {
+            if ($subvalue) {
+              $fsubs .= $subvalue . ";";
+            }
+          }
+          $all_fields[$compmap[$fkey]] = $fsubs;
+        }
+      }
+    }
+  }
+
+  // Salesforce Login information
+  $wsdl = $toolkit_path . '/soapclient/partner.wsdl.xml';
+  $userName = variable_get('salesforcewebform_user', NULL);
+  $password = variable_get('salesforcewebform_pw', NULL);
+
+  // Process of logging on and getting a salesforce.com session
+  try {
+    //$client = salesforcewebform_fields_salesforce_api_connect();
+    $sf = new SforcePartnerClient();
+    $sf->createConnection($wsdl);
+    $loginResult = $sf->login($userName, $password);
+    if ($sf === FALSE) {
+      $link = l('Please verify that you have completed your Salesforce credentials', "admin/config/development/salesforcewebform");
+      drupal_set_message(t('Unable to connect to Salesforce. !link', array('!link' => check_url($link))), 'error');
+      return;
+    }
+  }
+  catch (Exception $e) {
+    drupal_set_message(t("There was an error trying to connect to Salesforce.  Check your login credentials and/or the services this account is able to use (Enterprise, Unlimited, etc). Contact Salesforce to find out why you cannot access this API."));
+    return;
+    //DrupalSalesforce::watchdog(SALESFORCE_LOG_SOME, 'Unable to establish Salesforce connection while issuing describeSObjects API call.', array(), WATCHDOG_ERROR);
+  }
+
+  $sObjects = array();
+
+  $sObject = new sObject();
+  $sObject->type = $object_type; // Salesforce Table or object that you will perform the upsert on
+  $sObject->fields = $all_fields;
+  if ($sObject->type == "PAccount") {
+    $sObject->type = "Account";
+  }
+  if ($sObject->type == "AccountM") {
+    //Exceptions
+    $exceptions = array('LastName', 'FirstName', 'Email', 'LeadSource', 'HomePhone', 'MobilePhone', 'MailingCity', 'MailingPostalCode', 'MailingCountry', 'ContactOwner');
+    foreach ($exceptions as $keyname) {
+      if (array_key_exists($keyname, $sObject->fields)) {
+        unset($sObject->fields[$keyname]);
+      }
+    }
+    $sObject->type = "Account";
+  }
+  array_push($sObjects, $sObject);
+  //This passes the client = the login to sales force
+  // the $sObjects = data to upsert
+  // $file_updated = accounts which are updated
+  // $file_created = accounts which are inserted
+  // $file_failed =  accounts which failed
+  $file_created = 0;
+  $file_updated = 0;
+  $file_failed = 0;
+  $success = _salesforcewebform_upsert_accounts($sf, $sObjects, $file_updated, $file_created, $file_failed);
+
+  if (is_string($success) && $multiple_objects == TRUE) {
+    //Submit the contact with the account id as the account.
+    $sObject = new sObject();
+    $sObjects = array();
+    $sObject->type = "Contact"; // Salesforce Table or object that you will perform the upsert on
+    $all_fields['AccountId'] = $success;
+    $exceptions = array('AccountOwner', 'Name', 'Phone', 'OwnerId', 'BillingStreet', 'BillingCity', 'BillingState', 'BillingPostalCode', 'BillingCountry');
+    foreach ($exceptions as $keyname) {
+      if (array_key_exists($keyname, $all_fields)) {
+        unset($all_fields[$keyname]);
+      }
+    }
+    $sObject->fields = $all_fields;
+    array_push($sObjects, $sObject);
+    $success = _salesforcewebform_upsert_accounts($sf, $sObjects, $file_updated, $file_created, $file_failed);
+  }
+  // Update the overall counts
+  $accounts_created = 0;
+  $accounts_failed = 0;
+  $accounts_updated = 0;
+  $total_record_count = 0;
+  $record_count = 0;
+  if (is_array($success)) {
+    $accounts_created = $accounts_created + $success[0];
+    $accounts_updated = $accounts_updated + $success[1];
+    $accounts_failed =  $accounts_failed + $success[2];
+  }
+  $total_record_count = $total_record_count + $record_count;
+}
+
+function _salesforcewebform_upsert_accounts($client, $sObjects, $file_updated, $file_created, $file_failed) {
+  $accounts_created = 0;
+  $accounts_updated = 0;
+  $accounts_failed = 0;
+  try {
+    // The upsert process
+    $results = $client->upsert("WebformSID__c", $sObjects);
+    $k = 0;
+    // This loop processes $result to build the log files
+    foreach ($results as $result) {
+      // Build string from fields in $sObjects array
+      // At this point, the record has already been upserted
+      // We just need the data for the log file
+      // The string is the same, regardless of the result
+      if (isset($sObjects[$k]->fields['NAME']) && isset($sObjects[$k]->fields['SA_ID__C'])) {
+        $data2 = $sObjects[$k]->fields['NAME'] . ", " . $sObjects[$k]->fields['SA_ID__C'];
+      }
+
+
+      if (isset($result->created)) {
+        if ($result->created == TRUE) {
+          $accounts_created++;
+          return $result;
+          // file_put_contents($file_created, $data2 . "\n", FILE_APPEND);
+        }
+        else {
+          $accounts_updated++;
+          // file_put_contents($file_updated, $data2 . "\n", FILE_APPEND);
+        }
+      }
+      else {
+        $accounts_failed++;
+        // The errors object also contains fields and status_code
+        if (isset($result->getErrors)) {
+         $errMessage = $result->getErrors[0];
+        }
+        else {
+          $errMessage = "An unknown error occurred within Salesforce.";
+        }
+        // file_put_contents($file_failed, $data2 . ", " . $errMessage . "\n", FILE_APPEND);
+      }
+      $k++;
+    }
+    // Put the result counts into an array to pass back as the result.
+    $success = array();
+    array_push($success, $accounts_created, $accounts_updated, $accounts_failed);
+    if ($errMessage) {
+      drupal_set_message(t('@msg', array('@msg' => check_plain($errMessage))));
+    }
+    return $success;
+  }
+  catch (exception $e) {
+    // This is reached if there is a major problem in the data or with
+    // the salesforce.com connection. Normal data errors are caught by
+    // salesforce.com
+    drupal_set_message($e->faultstring);
+    return $e;
+  }
+}
+
+/*
+ *  Generate a random submission id
+ * @return $trim_sid
+ */
+function _salesforcewebform_generate_sid() {
+  $sid = md5(uniqid(rand(), TRUE));
+  $trim_sid = substr($sid, 0, 8);
+  return $trim_sid;
+}
+
+/*
+ * A recursive check to see if an array key exists in a multidimensional array
+ */
+function _salesforcewebform_array_key_exists_r($needle, $haystack, $parents = array()) {
+  $result = array_key_exists($needle, $haystack);
+  if ($result) {
+    if (count($parents) == 0) {
+      return $result;
+    }
+    else {
+      return $parents;
+    }
+  }
+  foreach ($haystack as $u => $v) {
+    if (is_array($v)) {
+      $parents[] = $u;
+      $result = _salesforcewebform_array_key_exists_r($needle, $v, $parents);
+    }
+    if ($result) {
+      return $result;
+    }
+  }
+  return $result;
+}

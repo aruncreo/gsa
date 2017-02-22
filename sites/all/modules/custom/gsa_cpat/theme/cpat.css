@@ -1,0 +1,36 @@
+.node-type-gsa-cpat #content-content .field,
+.node-type-gsa-cpat #content-content .groups {
+   clear: both;
+   margin: 1em 0;
+}
+
+.node-type-gsa-cpat #content-content .field-label {
+   width: 20%;
+   float: left;
+   padding-top: 0.75em;
+}
+
+.node-type-gsa-cpat #content-content .field-items {
+   width: 75%;
+   float: right;
+   padding-top: 0.75em;
+}
+
+.node-type-gsa-cpat #content-content p {
+  clear: both;
+  padding-top: 1em;
+}
+
+.cpat-message .message-label {
+  font-weight: bold;
+  display: inline-block;
+  width: 100px;
+  background: #efefef;
+  padding: 3px 3px;
+  margin-right: 3px;
+  text-align: right;
+}
+
+.cpat-message .content {
+  font-size: 105%;
+}

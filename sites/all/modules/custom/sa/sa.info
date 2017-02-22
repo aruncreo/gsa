@@ -1,0 +1,10 @@
+; $Id: sa.info 6 2012-06-19 23:25:16Z nikunjk $
+
+name = "SA"
+package = "GSA"
+
+core = "7.x"
+description = "Module to add missing gaps for drupal 6 custom modules."
+
+files[] = sa.module
+

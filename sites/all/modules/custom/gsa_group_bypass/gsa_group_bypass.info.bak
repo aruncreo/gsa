@@ -1,0 +1,6 @@
+name = GSA group bypass
+description = Provide options to allow users of a certain email to always join a group
+core = 7.x
+dependencies[] = gsa_config
+dependencies[] = og
+dependencies[] = og_ui

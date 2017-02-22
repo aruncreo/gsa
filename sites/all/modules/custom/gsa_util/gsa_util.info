@@ -1,0 +1,3 @@
+name = "GSA Utility"
+description = "Serves as a utility module to handle configurations for other modules"
+core = 7.x

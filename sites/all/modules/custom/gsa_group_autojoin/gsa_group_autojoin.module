@@ -1,0 +1,202 @@
+<?php
+
+define('GSA_AUTOJOIN_NO_USERS', 0);
+define('GSA_AUTOJOIN_ALL_USERS', 1);
+define('GSA_AUTOJOIN_GSA_USERS', 2);
+define('GSA_AUTOJOIN_GOV_MILL_USERS', 3);
+
+/**
+ * Implements hook_menu().
+ */
+function gsa_group_autojoin_menu() {
+  $items = array();
+  $items['group/%/%/admin/autojoin'] = array(
+    'title' => 'Autojoin settings',
+    'description' => 'Configure autojoin options for a group',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('gsa_group_autojoin_group_settings_form', 1, 2),
+    'access callback' => 'gsa_group_autojoin_group_settings_form_access',
+    'access arguments' =>  array(1, 2),
+    'file' => 'gsa_group_autojoin.pages.inc',
+    'type' => MENU_CALLBACK,
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_og_permission().
+ */
+function gsa_group_autojoin_og_permission() {
+  $permissions = array();
+  $permissions['set group auto-join options'] = array(
+    'title' => t('Set group auto-join options'),
+  );
+  return $permissions;
+}
+
+/**
+ * Implements hook_group_delete().
+ */
+function gsa_group_autojoin_group_delete(OgGroup $group) {
+  gsa_group_autojoin_save_setting($group);
+}
+
+/**
+ * Implements hook_user_insert().
+ */
+function gsa_group_autojoin_user_insert(&$edit, $account, $category) {
+  // When a user is added, auto-join them to the necessary groups
+  gsa_group_autojoin_join_user($account);
+}
+
+/**
+ * Implements hook_og_ui_get_group_admin().
+ */
+function gsa_group_autojoin_og_ui_get_group_admin() {
+  $items = array();
+  $items['gsa_group_autojoin'] = array(
+    'title' => t('Autojoin options'),
+    'description' => t('Configure autojoin options for this group'),
+    'href' => 'admin/autojoin',
+  );
+  return $items;
+}
+
+/**
+ * Save the autojoin setting for a group
+ *
+ * If an option was not chosen, the setting will simply be removed
+ *
+ * @param $nid
+ *   The group nid
+ * @param $setting
+ *   The autojoin setting
+ */
+function gsa_group_autojoin_save_setting($group, $setting = NULL) {
+  // Determine the group id
+  $gid = is_object($group) ? $group->gid : $group;
+  
+  // Remove any old settings for this group
+  db_delete('gsa_group_autojoin')
+    ->condition('gid', $gid)
+    ->execute();
+  
+  // Save new setting, if one was selected
+  if ($setting) {
+    db_insert('gsa_group_autojoin')
+      ->fields(array(
+        'gid' => $gid,
+        'setting' => $setting,
+      ))
+      ->execute();
+  }
+}
+
+/**
+ * Autojoin a user into groups which match their criteria
+ *
+ * @param $user
+ *   A user object
+ * @return
+ *   An array of groups which the user was enrolled into
+ */
+function gsa_group_autojoin_join_user($user) {
+  $settings = array();
+  
+  // Add groups which are set to join all users to our settings
+  $settings[] = GSA_AUTOJOIN_ALL_USERS;
+  
+  // Determine if the user is a *.gov or *.mil
+  if (gsa_config_user_is_gov_or_mil($user)) {
+    $settings[] = GSA_AUTOJOIN_GOV_MILL_USERS;
+  }
+  
+  // Determine if the user is a gsa.gov
+  if (gsa_config_user_is_gsa($user)) {
+    $settings[] = GSA_AUTOJOIN_GSA_USERS;
+  }
+  
+  // Fetch the groups that match our settings
+  $groups = gsa_group_autojoin_get_groups_by_setting($settings);
+
+  if (!empty($groups)) {
+    $group_labels = array();
+    foreach ($groups as $group) {
+
+      //passing parameter to enroll the newly registered user to multiple group based on the autojoin settings...
+      $values = array(
+          'entity_type' => 'user',
+          'entity' => $user,
+          'state' => OG_STATE_ACTIVE,
+      );
+
+      // Enroll the user
+      og_group($group->gid, $values);
+
+      // Changes the users role in the group (1 = non-member, 2 = member, 3 = administrator member
+      og_role_grant($group->gid, $user->uid, 2);
+
+      // Store the label
+      $group_labels[] = check_plain($group->label);
+    }
+//Removes duplicate groups from og_membership
+    $result = db_query("DELETE n1 FROM og_membership n1, og_membership n2 WHERE n1.id < n2.id AND n1.type = n2.type AND n1.etid = n2.etid AND n1.entity_type = n2.entity_type AND n1.gid = n2.gid AND n1.state = n2.state");
+  }
+  
+  return $groups;
+}
+
+/**
+ * Fetch all groups which have a given setting or settings
+ *
+ * @param $settings
+ *   The setting to search groups by, or an array of settings
+ * @return
+ *   An array of group entities, keyed by group id
+ */
+function gsa_group_autojoin_get_groups_by_setting($settings) {
+  // Convert the settings argument into an array, if needed
+  if (is_numeric($settings)) {
+    $settings = array($settings);
+  }
+
+  // Fetch the group ids that match the settings
+  $gids = db_select('gsa_group_autojoin')
+    ->fields('gsa_group_autojoin', array('gid'))
+    ->condition('setting', $settings, 'IN')
+    ->execute()
+    ->fetchCol();
+    
+  // Load and return the groups
+  return empty($gids) ? $gids : og_load_multiple($gids);
+}
+
+/**
+ * Fetch the auto-join setting for a given group
+ *
+ * @param $group
+ *   The group entity or group id
+ * @return
+ *   The setting for auto-joining for this group
+ */
+function gsa_group_autojoin_get_group_setting($group) {
+  return db_select('gsa_group_autojoin')
+    ->fields('gsa_group_autojoin', array('setting'))
+    ->condition('gid', is_object($group) ? $group->gid : $gid, '=')
+    ->execute()
+    ->fetchField();
+}
+
+/**
+ * Access handler for the group autojoin options form
+ */
+function gsa_group_autojoin_group_settings_form_access($entity_type, $entity_id) {
+  // Load the group
+  if ($group = og_get_group($entity_type, $entity_id)) {
+    // See if this user is a group admin
+    if (og_user_access($group->gid, 'set group auto-join options') || og_user_access($group->gid, 'administer group')) {
+      return TRUE;
+    }
+  }
+  return FALSE;
+}

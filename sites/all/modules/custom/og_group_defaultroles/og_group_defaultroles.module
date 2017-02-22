@@ -1,0 +1,217 @@
+<?php
+
+/**
+ * Implements hook_menu().
+ */
+function og_group_defaultroles_menu() {
+  $items = array();
+  $items['group/%/%/admin/defaultroles'] = array(
+    'title' => 'Group default user roles',
+    'description' => 'Configure default user roles for new group members',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('og_group_defaultroles_group_settings_form', 1, 2),
+    'access callback' => 'og_group_defaultroles_group_settings_form_access',
+    'access arguments' => array(1, 2),
+    'file' => 'og_group_defaultroles.pages.inc',
+    'type' => MENU_CALLBACK,
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_og_permission().
+ */
+function og_group_defaultroles_og_permission() {
+  return array(
+    'og_group_defaultroles_assign_roles' => array(
+      'title' => t('Assign group default user roles'),
+    )
+  );
+}
+
+/**
+ * Implements hook_og_ui_get_group_admin().
+ */
+function og_group_defaultroles_og_ui_get_group_admin() {
+  $items = array();
+  $items['og_group_defaultroles'] = array(
+    'title' => t('Default user roles'),
+    'description' => t('Configure default user roles for new group members'),
+    'href' => 'admin/defaultroles',
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_group_delete().
+ *
+ * Delete setings when a group is deleted.
+ */
+function og_group_defaultroles_group_delete($og_group) {
+  og_group_defaultroles_delete_defaults($og_group->gid);
+}
+
+/**
+ * Implements hook_og_membership_insert().
+ *
+ * Apply default roles when a group membership is created.
+ */
+function og_group_defaultroles_og_membership_insert(OgMembership $og_membership) {
+  $tests = og_group_defaultroles_test_conditions($og_membership->gid);
+  
+  foreach ($tests as $rid => $flag) {
+    if ($flag) {
+      og_role_grant($og_membership->gid, $og_membership->etid, $rid);
+    }
+  }
+}
+
+/**
+ * Access handler for the group default roles form
+ */
+function og_group_defaultroles_group_settings_form_access($entity_type, $entity_id) {
+  // Load the group
+  if ($group = og_get_group($entity_type, $entity_id)) {
+    // See if this user is a group admin
+    if (og_user_access($group->gid, 'og_group_defaultroles_assign_roles') || og_user_access($group->gid, 'administer group')) {
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
+/**
+ * Assemble a list of conditions defined by other modules.
+ *
+ * @return
+ *   Array of condition names keyed by function name.
+ */
+function og_group_defaultroles_get_conditions() {
+  $conds = &drupal_static(__FUNCTION__, array());
+  
+  // Allow other modules to add conditions.
+  foreach (module_implements('og_group_defaultroles_conditions') as $module) {
+    if ($conditions = module_invoke($module, 'og_group_defaultroles_conditions')) {
+      $conds = array_merge($conds, $conditions);
+    }
+  }
+
+  // The default condition will be evaluated last.
+  $conds['og_group_defaultroles_condition_default'] = 'Default';
+
+  return $conds;
+}
+
+/**
+ * Retrieve the list of default roles for a group.
+ *
+ * @param $gid
+ *   Integer group ID number.
+ *
+ * @return
+ *   Array of roles/settings for each condition defined for the group.
+ */
+function og_group_defaultroles_get_defaults($gid) {
+  $query = db_select('og_group_defaultroles', 'd')
+  ->fields('d', array('gid', 'cond', 'roles'))
+  ->condition('gid', $gid, '=');
+
+  $result = $query->execute();
+  
+  foreach ($result as $row) {
+    $return[$row->cond] = unserialize($row->roles);
+  }
+  
+  return $return;
+}
+
+/**
+ * Save a list of default roles.
+ *
+ * @param $gid
+ *   Integer group ID number.
+ *
+ * @param $settings
+ *   Array of roles/settings for each condition defined for the group.
+ */
+function og_group_defaultroles_save_defaults($gid, $settings) {
+  og_group_defaultroles_delete_defaults($gid);
+  foreach ($settings as $setting) {
+    db_insert('og_group_defaultroles')
+    ->fields(array(
+      'gid' => $gid,
+      'cond' => $setting['cond'],
+      'roles' => serialize($setting['roles']),
+    ))
+    ->execute();
+  }
+}
+
+/**
+ * Delete the saved roles for a group.
+ *
+ * @param $gid
+ *   Integer group ID number.
+ */
+function og_group_defaultroles_delete_defaults($gid) {
+  db_delete('og_group_defaultroles')
+  ->condition('gid', $gid)
+  ->execute();
+}
+
+/**
+ * Get the roles eligible for default settings.
+ *
+ * @param $gid
+ *   Integer group ID number.
+ *
+ * @return
+ *   Array of role names keyed by role ID.
+ */
+function og_group_defaultroles_get_roles($gid) {
+  $roles = og_roles($gid, NULL, TRUE);
+  foreach ($roles as $rid => $role_name) {
+    if ($role_name == OG_ANONYMOUS_ROLE || $role_name == OG_AUTHENTICATED_ROLE) {
+      unset($roles[$rid]);
+    }
+  }
+  return $roles;
+}
+
+/**
+ * Function for the default condition.
+ */
+function og_group_defaultroles_condition_default() {
+  return TRUE;
+}
+
+/**
+ * Test all applicable conditions for a group.
+ *
+ * @param $gid
+ *   Integer group ID number.
+ *
+ * @return
+ *   Array of boolean values keyed by role ID, indicating
+ *   whether a condition resulted in granting the role.
+ */
+function og_group_defaultroles_test_conditions($gid) {
+  $defaults = og_group_defaultroles_get_defaults($gid);
+  
+  $roles = array_fill_keys(array_keys(og_group_defaultroles_get_roles($gid)), FALSE);
+  
+  foreach ($defaults as $condition => $settings) {
+    if (function_exists($condition)) {
+      if ($test = call_user_func($condition, $gid)) {
+        foreach ($settings as $role_id => $value) {
+          if ($value != 0) {
+            $roles[$role_id] = TRUE;
+          }
+        }
+      }
+    }
+  }
+  
+  return $roles;
+}
+

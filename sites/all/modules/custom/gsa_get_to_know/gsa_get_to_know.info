@@ -1,0 +1,10 @@
+name = "GSA Get To Know"
+package = "GSA"
+description = "Module to add Get To Know block."
+
+core = 7.x
+
+version = 7.x-1.0
+
+files[] = gsa_get_to_know.module
+

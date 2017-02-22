@@ -1,0 +1,9 @@
+<?php
+
+/**
+ * Update the Views calc field definitions
+ */
+function gsa_charts_update_6000() {
+  // Depreciated
+  return array();
+}

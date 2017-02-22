@@ -1,0 +1,25 @@
+/* $Id: twocol_70_30.css 5 2012-06-19 15:14:44Z nikunjk $ */
+
+.twocol-70-30 .panel-panel {
+	display: block;
+	float: left;
+}
+
+.twocol-70-30 .panel-panel.panel-col-last {
+	width: 28%;
+	margin: 0 0 0 2%;
+	padding: 0;
+	overflow: hidden;
+}
+
+.twocol-70-30 .panel-panel.panel-col-first {
+	width: 68%;
+	margin: 0 2% 0 0;
+	padding: 0;
+	overflow: hidden;
+}
+
+.page-admin .twocol-70-30 .panel-panel.panel-col-last,
+.page-admin .twocol-70-30 .panel-panel.panel-col-first{
+	overflow: visible;
+}

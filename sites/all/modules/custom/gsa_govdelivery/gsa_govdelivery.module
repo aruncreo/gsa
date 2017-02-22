@@ -1,0 +1,42 @@
+<?php
+
+include_once('gsa_govdelivery.features.inc');
+
+/**
+* Implements hook_init().
+*/
+function gsa_govdelivery_init(){
+	global $user;
+	//Getting base path of the module GSA GovDelivery
+	$govDeliveryPath = drupal_get_path('module', 'gsa_govdelivery');
+	$govDeliveryPath = $GLOBALS['base_url'].'/'.$govDeliveryPath;
+	$pathArray = explode('/',$_GET['q']); 
+	
+	//Checking whether the current page is the dashboard page
+	if($pathArray[0] == 'dashboard'){
+		
+		//Getting the flag for Users GovDelivery popup visit status
+		$flag = flag_get_flag('gsa_govdelivery_subscription');
+
+		//Checking whether current user has already visited the popup
+		if(!$flag->is_flagged($user->uid)){
+	
+			//Script to create GovDelivery user subscription popup	
+			drupal_add_css($govDeliveryPath."/files/jquery/stylesheets/colorbox.css", array('type' => 'file','scope' => 'footer', 'weight' => 5));
+			drupal_add_js("https://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js", array( 'type' => 'external','scope' => 'footer', 'weight' => 5));
+			drupal_add_js('$.noConflict();',array('type' => 'inline', 'scope' => 'footer', 'weight' => 5) );
+			drupal_add_js($govDeliveryPath."/files/jquery/javascripts/json2.js", array('type' => 'file','scope' => 'footer', 'weight' => 5));
+			drupal_add_js($govDeliveryPath."/files/jquery/javascripts/jquery.colorbox.js", array('type' => 'file','scope' => 'footer', 'weight' => 5));
+			drupal_add_js($govDeliveryPath."/files/jquery/javascripts/govdpopup.js", array('type' => 'file','scope' => 'footer', 'weight' => 5));
+			drupal_add_js('var overlay = new GD.jquery.SubscribeOverlay({
+            				show: true, //change this to false to show up once.
+            				href: "'.$govDeliveryPath.'/files/client_popup_code/splash.html",
+            				close_text: "Skip to Content"
+        						}).init();',array('type' => 'inline', 'scope' => 'footer', 'weight' => 5) );
+			
+			//Setting the users GovDelivery popup visit status
+			$flag->flag('flag',$user->uid);
+			
+		}								
+	}
+}

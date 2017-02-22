@@ -1,0 +1,3 @@
+name = "GSA Contact Tab"
+description = "Removes the Contact Tab from the user profile page of the logged in user"
+core = "7.x"

@@ -1,0 +1,5 @@
+name = SUBGROUP
+core = 7.x
+description = This module is used to manage subgroup features of the organic groups.
+package = GSA
+

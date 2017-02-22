@@ -1,0 +1,163 @@
+<?php
+
+define('OG_ROLE_MESSAGES_TOKEN', '[og_role_message]');
+
+/**
+ * Implements hook_menu().
+ */
+function og_role_messages_menu() {
+  $items = array();
+  $items['group/%/%/admin/role-messages'] = array(
+    'title' => t('Role-based messages'),
+    'description' => t('Configure messages to group members, nonmembers, and anonymous visitors.'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('og_role_messages_group_settings_form', 1, 2),
+    'access callback' => 'og_role_messages_group_settings_form_access',
+    'access arguments' => array(1, 2),
+    'file' => 'og_role_messages.pages.inc',
+    'type' => MENU_CALLBACK,
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_og_permission().
+ */
+function og_role_messages_og_permission() {
+  return array(
+    'og_role_messages' => array(
+      'title' => t('Manage role-based messages'),
+    )
+  );
+}
+
+/**
+ * Implements hook_og_ui_get_group_admin().
+ */
+function og_role_messages_og_ui_get_group_admin() {
+  $items = array();
+  $items['og_role_messages'] = array(
+    'title' => t('Role-based messages'),
+    'description' => t('Configure messages to group members, nonmembers, and anonymous visitors.'),
+    'href' => 'admin/role-messages',
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_group_delete().
+ *
+ * Delete setings when a group is deleted.
+ */
+function og_role_messages_group_delete($og_group) {
+  og_role_messages_delete($og_group->gid);
+}
+
+/**
+ * Implements hook_field_attach_view_alter().
+ */
+function og_role_messages_field_attach_view_alter(&$output, $context) {
+  if (isset($output['body']) && $context['entity']->type == 'group') {
+    $output['body'][0]['#markup'] = og_role_messages_replace_token($output['body'][0]['#markup'], $context['entity']);
+  }
+}
+
+/**
+ * Return a string, replacing the pseudo-token with the appropriate message.
+ *
+ * @param $node
+ *   Optional node object to determine the current group. Defaults
+ *   to the current group context.
+ */
+function og_role_messages_replace_token($string, $node = NULL) {
+  global $user;
+
+  // Get the current group from $node or the current context
+  if ($node && $node->type == 'group') {
+    $group = og_get_group('node', $node->nid);
+  } else {
+    $group = og_features_get_group_context();
+  }
+  
+  if ($group) {
+
+    // Get defined messages
+    $messages = og_role_messages_get($group);
+
+    if ($user->uid > 0) {
+      $role = og_is_member($group->gid) ? 'member' : 'non-member';
+    } else {
+      $role = 'anonymous';
+    }
+    
+    if (isset($messages[$role])) {
+      $message = check_markup($messages[$role], 'full_html');
+      $string = str_replace(OG_ROLE_MESSAGES_TOKEN, $message, $string);
+    } else {
+      $string = str_replace(OG_ROLE_MESSAGES_TOKEN, '', $string);
+    }
+  }
+  
+  return $string;
+}
+
+/**
+ * Access handler for the messages form
+ */
+function og_role_messages_group_settings_form_access($entity_type, $entity_id) {
+  // Load the group
+  if ($group = og_get_group($entity_type, $entity_id)) {
+    // See if this user is a group admin
+    if (og_user_access($group->gid, 'og_role_messages') || og_user_access($group->gid, 'administer group')) {
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
+/**
+ * Get the defined messages for a group.
+ *
+ * @return
+ *   Array of messages keyed by role tag.
+ */
+function og_role_messages_get($og_group) {
+  $messages = array();
+  
+  $query = db_select('og_role_messages', 'ogrm');
+  $query->fields('ogrm');
+  $query->condition('gid', $og_group->gid);
+  $result = $query->execute();
+  
+  foreach ($result as $row) {
+    $messages[$row->role] = $row->message;
+  }
+
+  return $messages;
+}
+
+/**
+ * Delete one or all messages for a group.
+ */
+function og_role_messages_delete($gid, $role = NULL) {
+  $query = db_delete('og_role_messages');
+  $query->condition('gid', $gid, '=');
+  if ($role) {
+    $query->condition('role', $role, '=');
+  }
+  $query->execute();
+}
+
+/**
+ * Create a message.
+ */
+function og_role_messages_create($gid, $role, $message) {
+  db_insert('og_role_messages')
+  ->fields(array(
+    'gid' => $gid,
+    'role' => $role,
+    'message' => $message,
+  ))
+  ->execute();
+}
+

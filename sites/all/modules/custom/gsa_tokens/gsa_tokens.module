@@ -1,0 +1,85 @@
+<?php
+
+/**
+ * Implements hook_token_info().
+ */
+function gsa_tokens_token_info() {
+  // Node tokens.
+  $info['tokens']['node']['gsa-ogname'] = array(
+    'name' => t('GSA Group name'),
+    'description' => t("Title of group home page.")
+  );
+  
+  $info['tokens']['node']['gsa-ogname-raw'] = array(
+    'name' => t('GSA Group name - raw'),
+    'description' => t("Unfiltered title of group home page. WARNING - raw user input.")
+  );
+
+    $info['tokens']['node']['time-to-expire'] = array(
+    'name' => t('Expiry Time'),
+    'description' => t('Expiry time'),
+  );
+  
+  $info['tokens']['node']['gsa-og-id'] = array(
+    'name' => t('GSA Group node ID'),
+    'description' => t("Node ID of group home page.")
+  );
+  
+  $info['tokens']['node']['gsa-og-type'] = array(
+    'name' => t('GSA Group node type'),
+    'description' => t("Node type of the group node.")
+  );
+  
+  $info['tokens']['node']['gsa-ogalias'] = array(
+    'name' => t('GSA Group URL alias'),
+    'description' => t("Aliased path of the group home page.")
+  );
+  
+  return $info;
+}
+
+
+/**
+ * Implements hook_tokens().
+ *
+ * @ingroup token_example
+ */
+function gsa_tokens_tokens($type, $tokens, array $data = array(), array $options = array()) {
+
+  $replacements = array();
+  
+  if ($type == 'node' && $group = og_features_get_group_context()) {
+
+    foreach ($tokens as $name => $original) {
+  
+      switch ($name) {
+    
+        case 'gsa-ogname': 
+          $replacements[$original] = check_plain($group->title);
+          break;
+    
+        case 'gsa-ogname-raw': 
+          $replacements[$original] = $group->title;
+          break;
+    
+        case 'gsa-og-id': 
+          $replacements[$original] = $group->etid;
+          break;
+    
+        case 'gsa-og-type': 
+          $replacements[$original] = $group->bundle_name;
+          break;
+    
+        case 'gsa-ogalias': 
+          $replacements[$original] = drupal_get_path_alias('node/'. $groue->etid);
+          break;
+      }
+    
+    }
+  }
+  
+
+  
+  return $replacements;
+}
+

@@ -1,0 +1,8 @@
+; $Id: gsa_vcf.info 6 2012-06-19 23:25:16Z nikunjk $
+
+name = GSA Views Calc Features
+core = "6.x"
+description = "This is a module that provides Features support for the Views Calc module."
+dependencies[] = exportables
+dependencies[] = views_calc
+package = "GSA"

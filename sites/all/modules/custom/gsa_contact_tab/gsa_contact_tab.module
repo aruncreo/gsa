@@ -1,0 +1,17 @@
+<?php
+
+/**
+ * Implements hook_menu_alter().
+ */
+function gsa_contact_tab_menu_alter(&$items){
+	$items['user/%user/contact']['access callback'] = 'gsa_contact_tab_access';
+	$items['user/%user/contact']['access arguments'] = array(1);
+}
+
+/**
+ * GSA Contact Tab access callback.
+ */
+function gsa_contact_tab_access($account) {
+  return $GLOBALS['user']->uid != $account->uid;
+}
+

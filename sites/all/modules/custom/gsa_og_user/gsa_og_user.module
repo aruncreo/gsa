@@ -1,0 +1,122 @@
+<?php
+
+/**
+* Implements hook_form_alter
+*/
+function gsa_og_user_form_alter(&$form, &$form_state, $form_id){
+	
+
+	if($form_id=='og_ui_confirm_unsubscribe'){
+		$cururl=$_GET['q'];
+		global $user;
+		$paramArray=explode('/',$cururl);
+		if($paramArray[4]=='group'){
+			$form['#action']=$form['#action'].'?destination=groups';
+		}else{
+			$form['#action']=$form['#action'].'?destination=user/'.$user->uid.'/my-groups';
+		}
+	}
+	if($form_id=='user_register_form'){
+		$form['#pre_render'][2]='gsa_og_user_group_filter';
+	}
+	return $form;
+}
+
+/**
+* Implements hook_og_membership_insert
+* Invokes when user joins a group and clears all cache
+*/
+
+function gsa_og_user_og_membership_insert(OgMembership $ogMembership)
+{
+  if ($ogMembership->entity_type == 'user') {
+    $gid = $ogMembership->gid;
+  	cache_clear_all('count_member_' . $gid . '', 'cache', TRUE);
+  }
+}
+
+/**
+* Implements hook_og_membership_delete
+* Invokes when user leaves a group and clears all cache
+*/
+
+function gsa_og_user_og_membership_delete(OgMembership $ogMembership)
+{
+  if ($ogMembership->entity_type == 'user') {
+    $gid = $ogMembership->gid;
+  	cache_clear_all('count_member_' . $gid . '', 'cache', TRUE);
+  }
+}
+
+/**
+* Function called on user registartion form pre render event
+*/
+function gsa_og_user_group_filter(&$form){	
+	
+	$publicGroup= array();
+	foreach($form['group_audience']['und']['#audience']['other groups'] as $key=>$value){
+		$query = db_select('og', 'a');
+		$query->join('field_data_group_access', 'b', 'a.etid = b.entity_id');
+		$query->join('field_data_group_register','c','a.etid = c.entity_id');
+		$query->fields('b',array('group_access_value'));
+		$query->fields('c',array('group_register_value'))->condition('a.gid', $key);
+		$result=$query->execute();
+		$record = $result->fetchAssoc(); 
+		if($record['group_access_value']==0 && $record['group_register_value']==1){
+			$publicGroup[$key]=$value;
+		}
+	}
+	
+	unset($form['group_audience']['und']['#options']['My groups']);
+	$form['group_audience']['und']['#options']['Other groups']=$publicGroup;
+	$form['group_audience'][LANGUAGE_NONE]['#title'] = t('Groups');
+	$form['group_audience'][LANGUAGE_NONE]['#description'] = t('Select the groups you wish to join.');
+	return $form;
+
+}
+
+
+/**
+* Implements hook_module_implement_alter
+*/
+
+function gsa_og_user_module_implements_alter(&$module_list, $context){
+	
+	$paramArray=explode('/',$_GET['q']);
+	$disableHook=FALSE;
+	if(isset($paramArray[2]) && $paramArray[2]=='edit'){
+
+		$disableHook=TRUE;
+	
+	}
+	if(isset($paramArray[1]) && $paramArray[1]=='register'){
+		
+		$disableHook=TRUE;
+	}
+		
+	if($context === "entity_insert"){
+		if($disableHook==TRUE){
+			unset($module_list['og']);
+		}	
+	}
+	
+	if($context === "entity_presave"){
+		if($disableHook==TRUE){
+			unset($module_list['og']);
+		}
+	}
+}
+
+
+/**
+* Implements hook_user_login
+*/
+function gsa_og_user_user_login(&$edit, $account){
+
+	if($account->access == 0){
+		// Auto assigning user to group
+		gsa_group_autojoin_join_user($account);
+
+	}
+   
+}

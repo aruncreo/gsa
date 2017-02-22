@@ -1,0 +1,61 @@
+<?php
+
+/**
+ * Implementation of hook_install().
+ */
+function views_nodetype_exclude_install() {
+  drupal_install_schema('views_nodetype_exclude');
+}
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function views_nodetype_exclude_uninstall() {
+  drupal_uninstall_schema('views_nodetype_exclude');
+}
+
+/**
+ * Implementation of hook_schema().
+ */
+function views_nodetype_exclude_schema() {
+  $schema['views_nodetype_exclude'] = array(
+
+    'description' => 'Content types to exclude from designated views.', 
+    'fields' => array(
+    
+      'id' => array(
+        'description' => 'Primary Key: Unique ID.',
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE
+      ),
+
+      'mode' => array(
+        'description' => 'Exclusion mode.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+
+      'view' => array(
+        'description' => 'View name.', 
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+
+      'type' => array(
+        'description' => 'Content type.', 
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+    ),
+    'primary key' => array('id'),
+  );
+  
+  return $schema;
+}

@@ -1,0 +1,208 @@
+<?php
+
+/**
+ * Admin settings form
+ */
+function gsa_cpat_admin_settings_form($form, &$form_state) {
+  $form['gsa_cpat_group'] = array(
+    '#type' => 'select',
+    '#title' => t('CTAT Group'),
+    '#description' => t('The group that contains CTAT functionality.'),
+    '#options' => og_get_all_group(),
+    '#default_value' => gsa_cpat_get_cpat_group(FALSE),
+  );
+  $form['gsa_cpat_questionable_threshold'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Questionable content notification threshold'),
+    '#size' => 3,
+    '#description' => t('Set the number of times a CTAT item has to be marked as questionable before a group admin is notified via email. If set to zero, no notification will be sent.'),
+    '#default_value' => variable_get('gsa_cpat_questionable_threshold', 10),
+  );
+  $form['gsa_cpat_disclaimer'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Disclaimer'),
+    '#description' => t('Optionally supply a disclaimer to be present on CTAT nodes during add and edit. Users will have to agree to it before posting.'),
+    '#default_value' => variable_get('gsa_cpat_disclaimer', ''),
+  );
+  
+  $form['gsa_cpat_ghp_prompts'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Group home page messages'),
+  );
+  $form['gsa_cpat_ghp_prompts']['gsa_cpat_ghp_prompt_join'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Join'),
+    '#default_value' => variable_get('gsa_cpat_ghp_prompt_join', NULL),
+    '#description' => t('Appears beside the "Join CTAT" button (displayed only to nonmembers).'),
+  );
+  $form['gsa_cpat_ghp_prompts']['gsa_cpat_ghp_prompt_post'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Post'),
+    '#default_value' => variable_get('gsa_cpat_ghp_prompt_post', NULL),
+    '#description' => t('Appears beside the "Post CTAT Opportunity" button (displayed only to members with posting rights).'),
+  );
+  $form['gsa_cpat_ghp_prompts']['gsa_cpat_ghp_prompt_search'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Search'),
+    '#default_value' => variable_get('gsa_cpat_ghp_prompt_search', NULL),
+    '#description' => t('Appears beside the "Search CTAT Opportunities" button (displayed to all members).'),
+  );
+  
+  $form['gsa_cpat_authentication'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Authentication'),
+  );
+  $form['gsa_cpat_authentication']['gsa_cpat_authentication_instructions'] = array(
+    '#type' => 'textarea',
+    '#title' => t('User instructions'),
+    '#description' => t('Appears at the top of the new member authentication form.'),
+    '#default_value' => variable_get('gsa_cpat_authentication_instructions', NULL),
+  );
+  $form['gsa_cpat_authentication']['gsa_cpat_wsdl_url'] = array(
+    '#type' => 'textfield',
+    '#title' => t('WSDL URL'),
+    '#default_value' => variable_get('gsa_cpat_wsdl_url', NULL),
+  );
+  $form['gsa_cpat_authentication']['gsa_cpat_authentication_demo_mode'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Demo mode'),
+    '#default_value' => variable_get('gsa_cpat_authentication_demo_mode', 0),
+    '#description' => t(
+      'Use a dummy validator when accepting group membership requests,  
+      bypassing the authentication web service. The validator accepts
+      contract number <strong>GS23F0000K</strong> and password <strong>3210ABCD%</strong>.
+      <em>Do not use this feature on production sites!</em>.'
+    ),
+  );
+  
+  $form['gsa_cpat_renewal'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Expiration and renewal'),
+  );
+  $form['gsa_cpat_renewal']['gsa_cpat_expiration_days'] = array(
+    '#type' => 'textfield',
+    '#size' => 2,
+    '#default_value' => variable_get('gsa_cpat_expiration_days', 0),
+    '#title' => t('Days until expiration'),
+    '#description' => t('Enter the amount of days that must pass before an unrenewed CTAT post will expire. When a post expires, it will be deleted from the system. Entering 0 will disable expiration. Be aware that changing this value after posts have been created and renewed can result in expiration without notifications being sent out.'),
+  );
+  $form['gsa_cpat_renewal']['gsa_cpat_renewal_period'] = array(
+    '#type' => 'textfield',
+    '#size' => 2,
+    '#default_value' => variable_get('gsa_cpat_renewal_period', 0),
+    '#title' => t('Period of allowed renewal'),
+    '#description' => t('Enter the amount of days that a user can renew a post before the expiration date. Entering 0 will allow users to renew their posts at any time.'),
+  );
+  $form['gsa_cpat_renewal']['gsa_cpat_expiration_first_notification'] = array(
+    '#type' => 'textfield',
+    '#size' => 2,
+    '#default_value' => variable_get('gsa_cpat_expiration_first_notification', 0),
+    '#title' => t('First notification of pending expiration'),
+    '#description' => t('Enter the amount of days before the expiration date when the first notification will be sent to the user to renew their post. Entering 0 will result is no notification being sent.'),
+  );
+  $form['gsa_cpat_renewal']['gsa_cpat_expiration_second_notification'] = array(
+    '#type' => 'textfield',
+    '#size' => 2,
+    '#default_value' => variable_get('gsa_cpat_expiration_second_notification', 0),
+    '#title' => t('Second notification of pending expiration'),
+    '#description' => t('Enter the amount of days before the expiration date when the second notification will be sent to the user to renew their post. Entering 0 will result is no notification being sent.'),
+  );
+
+  return system_settings_form($form);
+}
+
+/**
+ * Validation for admin settings form
+ */
+function gsa_cpat_admin_settings_form_validate(&$form, &$form_state) {
+  // Make sure the follow are all numbers
+  if (!is_numeric($form_state['values']['gsa_cpat_questionable_threshold'])) {
+    form_set_error('gsa_cpat_questionable_threshold', t('The threshold limit must be a number.'));
+  }
+  if (!is_numeric($form_state['values']['gsa_cpat_expiration_days'])) {
+    form_set_error('gsa_cpat_expiration_days', t('The day until expiration must be a number.'));
+  }
+  if (!is_numeric($form_state['values']['gsa_cpat_renewal_period'])) {
+    form_set_error('gsa_cpat_renewal_period', t('The allowed renewal period must be a number.'));
+  }
+  if (!is_numeric($form_state['values']['gsa_cpat_expiration_first_notification'])) {
+    form_set_error('gsa_cpat_expiration_first_notification', t('The first notification period must be a number.'));
+  }
+  if (!is_numeric($form_state['values']['gsa_cpat_expiration_second_notification'])) {
+    form_set_error('gsa_cpat_expiration_second_notification', t('The second notification period must be a number.'));
+  }
+  
+  // Check if the renewal period is longer than the expiration period
+  if ($form_state['values']['gsa_cpat_renewal_period'] > $form_state['values']['gsa_cpat_expiration_days']) {
+    form_set_error('gsa_cpat_renewal_period', t('The renewal period cannot be greater than the expiration period.'));
+  }
+  // Check if the notifications are sent out before the renewal is allowed
+  if ($form_state['values']['gsa_cpat_renewal_period'] < $form_state['values']['gsa_cpat_expiration_first_notification']) {
+    form_set_error('gsa_cpat_expiration_first_notification', t('The first notification cannot be sent out before renewals are allowed.'));
+  }
+  if ($form_state['values']['gsa_cpat_renewal_period'] < $form_state['values']['gsa_cpat_expiration_second_notification']) {
+    form_set_error('gsa_cpat_expiration_second_notification', t('The second notification cannot be sent out before renewals are allowed.'));
+  }
+  // Check if the first notification is sent after the second
+  if ($form_state['values']['gsa_cpat_expiration_first_notification'] < $form_state['values']['gsa_cpat_expiration_second_notification']) {
+    form_set_error('gsa_cpat_expiration_first_notification', t('The first notification cannot come after the second.'));
+  }
+  // Check if the notifications are set for the same day
+  if ($form_state['values']['gsa_cpat_expiration_first_notification'] == $form_state['values']['gsa_cpat_expiration_second_notification'] && $form_state['values']['gsa_cpat_expiration_first_notification'] != 0) {
+    form_set_error('gsa_cpat_expiration_first_notification', t('The notifications cannot come on the same day.'));
+  }
+}
+
+/**
+ * The CPAT node expiration queue
+ */
+function gsa_cpat_expiration_queue() {
+  // Check that expiration is enabled
+  if (!($expiration = variable_get('gsa_cpat_expiration_days', 0))) {
+    return t('Expiration is currently disabled.');
+  }
+  
+  // Create the table headers
+  $headers = array(
+    t('CTAT'),
+    t('Creator'),
+    t('Created'),
+    t('Updated'),
+    t('Renewed'),
+    t('Expires'),
+    t('Notifications sent'),
+  );
+  
+  // Fetch the CPAT nodes and the data we need to display
+  $query = db_select('gsa_cpat_expire', 'gce');
+  $query->fields('gce', array('nid', 'renewed', 'notifications'));
+  $query->leftJoin('node','n','n.nid = gce.nid');
+  $query->leftJoin('users','u','u.uid = n.uid');
+  $query->fields('n', array('title', 'uid', 'created', 'changed'));
+  $query->fields('u', array('name'));
+  $query->addExpression('COUNT(gce.nid)', 'count');
+  $query->groupBy('gce.renewed');
+  $results = $query->execute()->fetchAll();
+  
+  // Build the rows
+  $rows = array();
+  foreach ($results as $result) {
+    $rows[] = array(
+      l($result->title, "node/{$result->nid}"),
+      theme('username', $result),
+      format_date($result->created, 'small'),
+      format_date($result->changed, 'small'),
+      format_date($result->renewed, 'small'),
+      format_date($result->renewed + ($expiration * 86400), 'small'),
+      $result->notifications,
+    );
+  }
+  
+  // Make sure we have rows to render
+  if (empty($rows)) {
+    return t('There are currently no CTAT nodes.');
+  }
+  
+  // Render the table
+  return theme('table', array('header' => $headers, 'rows' => $rows));
+}

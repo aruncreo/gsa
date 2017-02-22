@@ -1,0 +1,195 @@
+<?php
+
+/**
+ * Implements hook_menu().
+ */
+function og_migrate_cleanup_menu() {
+  $items = array();
+
+  $items['admin/config/group/group-migrate-cleanup'] = array(
+    'title' => 'OG migrate cleanup',
+    'description' => 'Clean up migration errors',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('og_migrate_cleanup_form'),
+    'access arguments' => array('access administration pages'),
+  );
+
+  $items['admin/config/group/group-migrate-cleanup-audience'] = array(
+    'title' => 'OG migrate cleanup - audience',
+    'description' => 'Repair audience field data for nodes',
+    'page callback' => 'og_migrate_cleanup_audience',
+    'access arguments' => array('access administration pages'),
+    'type' => MENU_CALLBACK,
+  );
+
+  $items['admin/config/group/group-migrate-cleanup-userroles'] = array(
+    'title' => 'OG migrate cleanup - user roles',
+    'description' => 'Import D6 user roles',
+    'page callback' => 'og_migrate_cleanup_userroles',
+    'access arguments' => array('access administration pages'),
+    'type' => MENU_CALLBACK,
+  );
+
+  return $items;
+}
+
+/**
+ * Form builder.
+ */
+function og_migrate_cleanup_form() {
+  $form = array();
+  
+  $form['audience'] = array(
+    '#type' => 'submit',
+    '#value' => 'Group audience fields',
+  );
+  
+  $form['userroles'] = array(
+    '#type' => 'submit',
+    '#value' => 'User roles',
+    '#description' => t('The required databases must be installed first.'),
+  );
+  
+  return $form;
+}
+
+/**
+ * Submit function for form.
+ */
+function og_migrate_cleanup_form_submit(&$form, &$form_state) {
+  switch ($form_state['clicked_button']['#value']) {
+    case 'Group audience fields':
+      og_migrate_cleanup_audience();
+      break;
+      
+    case 'User roles':
+      og_migrate_cleanup_userroles();
+      break;
+  }
+}
+
+/**
+ * Callback to migrate D6 user roles.
+ */
+function og_migrate_cleanup_userroles() {
+
+  // Get the list of D6 role ids/names
+  $d6_roles = array();
+  $d6_role_query = db_select('d6_role')
+  ->fields('d6_role')
+  ->execute();
+  foreach ($d6_role_query as $row) {
+    $d6_roles[$row->rid] = $row->name;
+  }
+  
+  // Get the list of D7 roles by group
+  $d7_group_roles = array();
+  $d7_role_query = db_select('og_role')
+  ->fields('og_role')
+  ->execute();
+  foreach ($d7_role_query as $row) {
+    $d7_group_roles[$row->gid][$row->name] = $row->rid;
+  }
+  
+  // Get the list of D7 nids/gids
+  $d7_gids = array();
+  $groups = db_select('og')
+  ->fields('og', array('gid', 'etid'))
+  ->condition('entity_type', 'node', '=')
+  ->execute();
+  foreach ($groups as $row) {
+    $d7_gids[$row->etid] = $row->gid;
+  }
+  
+  // Get the D6 assigned roles
+  $d6_assigned_query = db_select('d6_og_users_roles')
+  ->fields('d6_og_users_roles')
+  ->execute();
+
+  $batch = array();
+  
+  // Set a batch op for each D6 user/role assignment
+  foreach ($d6_assigned_query as $row) {
+    // Look up the D7 gid from the nid
+    $gid = $d7_gids[$row->gid];
+
+    // Use 0 for the group key if this group doesn't use custom roles
+    $group_key = (array_key_exists($gid, $d7_group_roles)) ? $gid : 0;
+
+    // Look up the rid by gid and role name
+    $rid = $d7_group_roles[$group_key][$d6_roles[$row->rid]];
+
+    $batch['operations'][] = array(
+      'og_role_grant',
+      array (
+        'gid' => $gid,
+        'uid' => $row->uid,
+        'rid' => $rid,
+      )
+    );
+  }
+  
+  batch_set($batch);
+  batch_process();
+}
+
+/**
+ * Callback to clean up audience field data.
+ */
+function og_migrate_cleanup_audience() {
+  $query = db_select('og_membership','ogm');
+  $query->fields('ogm');
+  $query->condition('ogm.entity_type', 'node');
+  $query->orderBy('ogm.etid');
+  $result = $query->execute();
+  
+  $last_etid = NULL;
+  
+  $batch = array(
+    'title' => t('Adding group audience fields for nodes'),
+  );
+  
+  foreach ($result as $row) {
+    $node = node_load($row->etid);
+    $delta = ($last_etid == $row->etid) ? $delta + 1 : 0;
+    $batch['operations'][] = array(
+      'og_migrate_cleanup_audience_op',
+      array($row, $node, $delta),
+    );
+    $last_etid = $row->etid;
+  }
+  
+  batch_set($batch);
+  batch_process();
+}
+
+/**
+ * Batch operation to set audience field data.
+ */
+function og_migrate_cleanup_audience_op($membership, $node, $delta = 0) {
+  $key = array(
+    'entity_type' => $membership->entity_type,
+    'entity_id' => $membership->etid,
+    'delta' => $delta,
+  );
+
+  $fields = array(
+    'bundle' => $node->type,
+    'deleted' => 0,
+    'revision_id' => $node->vid,
+    'language' => $node->language,
+    'group_audience_gid' => $membership->gid,
+    'group_audience_state' => $membership->state,
+    'group_audience_created' => $membership->created,
+  );
+  
+  db_merge('field_data_group_audience')
+  ->key($key)
+  ->fields($fields)
+  ->execute();
+
+  db_merge('field_revision_group_audience')
+  ->key($key)
+  ->fields($fields)
+  ->execute();
+}

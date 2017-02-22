@@ -1,0 +1,4 @@
+name = "GSA OG Permission Extras"
+description = "Fix various OG permission-related problems"
+core = 7.x
+dependencies[] = og

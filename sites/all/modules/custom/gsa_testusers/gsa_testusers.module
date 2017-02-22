@@ -1,0 +1,160 @@
+<?php
+
+function gsa_testusers_menu() {
+  $items = array();
+  $items['admin/config/gsa-testusers'] = array(
+    'title' => 'GSA test users',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('gsa_testusers_page'),
+    'access arguments' => array('administer site configuration'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  return $items;
+}
+
+function gsa_testusers_page() {
+  $form['users'] = array(
+    '#type' => 'fieldset',
+    '#title' => 'Add users',
+  );
+  $form['users']['start_num'] = array(
+    '#type' => 'textfield',
+    '#title' => 'Starting serial number',
+    '#default_value' => '0',
+  );
+  $form['users']['quantity'] = array(
+    '#type' => 'textfield',
+    '#title' => 'Number of users to create',
+    '#default_value' => '1000',
+  );
+  $form['users']['name_base'] = array(
+    '#type' => 'textfield',
+    '#title' => 'User name prefix',
+    '#default_value' => 'soasta',
+  );
+  $form['users']['password'] = array(
+    '#type' => 'textfield',
+    '#title' => 'Password',
+    '#default_value' => 'soasta',
+  );
+  $form['users']['add-users'] = array(
+    '#type' => 'submit',
+    '#value' => t('Add users'),
+    '#submit' => array('gsa_testusers_add_users'),
+  );
+  $form['groups'] = array(
+    '#type' => 'fieldset',
+    '#title' => 'Add users to groups',
+  );
+  $form['groups']['groups_name_base'] = array(
+    '#type' => 'textfield',
+    '#title' => 'User name prefix',
+    '#default_value' => 'soasta',
+  );
+  $form['groups']['gid'] = array(
+    '#type' => 'textfield',
+    '#title' => 'Group node ID',
+    '#default_value' => '1',
+  );
+  $form['groups']['join-groups'] = array(
+    '#type' => 'submit',
+    '#value' => t('Join groups'),
+    '#submit' => array('gsa_testusers_join_groups'),
+  );
+  $form['delete'] = array(
+    '#type' => 'fieldset',
+    '#title' => 'Delete users',
+  );
+  $form['delete']['delete_markup'] = array(
+    '#type' => 'markup',
+    '#value' => t('<p>Delete a maximum of 200 users per batch.</p>'),
+  );
+  $form['delete']['delete_name_base'] = array(
+    '#type' => 'textfield',
+    '#title' => 'User name prefix',
+    '#default_value' => 'soasta',
+  );
+  $form['delete']['del-users'] = array(
+    '#type' => 'submit',
+    '#value' => t('Delete users'),
+    '#submit' => array('gsa_testusers_delete_users'),
+  );
+  return $form;
+}
+
+function gsa_testusers_add_users($form, $form_state) {
+  $start = $form_state['values']['start_num'];
+  $count = $form_state['values']['quantity'];
+  $pass = $form_state['values']['password'];
+  $name = $form_state['values']['name_base'];
+  $operations = array();
+  
+  for ($i = intval($start); $i < intval($start) + intval($count); $i++) {
+    $user = array(
+      'name' => $name . $i,
+      'pass' => $pass,
+      'mail' => $name . $i . '@' . $name . '.com',
+      'status' => 1,
+    );
+  
+    $operations[] = array('user_save', array(NULL, $user));
+  }
+  
+  $batch['operations'] = $operations;
+  batch_set($batch);
+}
+
+function gsa_testusers_join_groups($form, $form_state) {
+  if ($form_state['values']['groups_name_base'] != '') {
+    $operations = array();
+    $group_id = intval($form_state['values']['gid']);
+    //$users = db_query("SELECT uid FROM {users} WHERE name LIKE '" . $form_state['values']['groups_name_base'] . "%'");
+  
+    $users =  db_select('users')
+    ->fields('users', array('uid'))
+    ->condition('name', $form_state['values']['groups_name_base'].'%', 'like')
+    ->execute()
+    ->fetchAll();
+    
+    if(!empty($users)){
+      foreach($users as $user){
+        $operations[] = array('og_save_subscription', array($group_id, $user->uid, array('is_active' => 1)));
+      }
+    }
+   /*  while ($user = db_fetch_object($users)) {
+      $operations[] = array('og_save_subscription', array($group_id, $user->uid, array('is_active' => 1)));
+    }
+   */
+    $batch['operations'] = $operations;
+    batch_set($batch);
+  }
+}
+
+function gsa_testusers_delete_users($form, $form_state) {
+  if ($form_state['values']['delete_name_base'] != '') {
+    $operations = array();
+    
+    $users =  db_select('users')
+    ->fields('users', array('uid'))
+    ->condition('name', $form_state['values']['delete_name_base'].'%', 'like')
+    ->range(0,200)
+    ->execute()
+    ->fetchAll();
+    
+    if(!empty($users)){
+      foreach($users as $user){
+        $operations[] = array('user_delete', array($user->uid));
+        }
+    }
+    
+    //$users = db_query("SELECT uid FROM {users} WHERE name LIKE '" . $form_state['values']['delete_name_base'] . "%' LIMIT 200");
+  
+   /*  while ($user = db_fetch_object($users)) {
+      $operations[] = array('user_delete', array(array(), $user->uid));
+    } */
+    
+    $batch['operations'] = $operations;
+    batch_set($batch);
+  }
+}

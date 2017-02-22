@@ -1,0 +1,832 @@
+<?php
+
+// Site-admin settings
+define('OG_FEATURES_ADMIN_DISABLED', 0);
+define('OG_FEATURES_ADMIN_ENABLED', 1);
+define('OG_FEATURES_ADMIN_TOGGLE_ENABLED', 2);
+define('OG_FEATURES_ADMIN_TOGGLE_DISABLED', 3);
+
+// Group-admin settings
+define('OG_FEATURES_FEATURE_ENABLED', 1);
+define('OG_FEATURES_FEATURE_DISABLED', 0);
+
+// @todo: Remove disabled nodes from group content views
+// @todo: Remove disabled node types from group content view filters
+// @todo: Create OG permissions to toggling group features
+
+/**
+ * Implements hook_permission().
+ */
+function og_features_permission() {
+  $perms = array();
+  $perms['administer og features'] = array(
+    'title' => t('Administer OG features'),
+  );
+  $perms['edit all group features'] = array(
+    'title' => t('Edit all group features'),
+  );
+  return $perms;
+}
+
+/**
+ * Implements hook_og_permission().
+ */
+function og_features_og_permission() {
+  $perms = array();
+  $perms['edit own group features'] = array(
+    'title' => t('Edit own group features'),
+  );
+  return $perms;
+}
+
+/**
+ * Implements hook_menu().
+ */
+function og_features_menu() {
+  $menu = array();
+  $menu['group/%/%/admin/features'] = array(
+    'title' => 'Features',
+    'description' => 'Manage features for the group',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('og_features_feature_form', 1, 2),
+    'access callback' => 'og_features_feature_form_access',
+    'access arguments' =>  array(1, 2),
+    'file' => 'og_features.pages.inc',
+    'type' => MENU_CALLBACK,
+  );
+  $menu['admin/config/group/og_features'] = array(
+    'title' => 'OG features configuration',
+    'description' => 'Set the available features for each group type',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('og_features_admin_settings'),
+    'access callback' => 'user_access',
+    'access arguments' =>  array('administer og features'),
+    'file' => 'og_features.admin.inc',
+    'type' => MENU_NORMAL_ITEM,
+  );
+  return $menu;
+}
+
+/**
+ * Implements hook_menu_alter().
+ */
+function og_features_menu_alter(&$items) {   
+  // Iterate every menu item and hijack the access callback
+  foreach ($items as $key => $item) {
+    // If there is no access callback and no access arguments
+    // this is most likely a local task, and will default to the root
+    if (!isset($items[$key]['access arguments']) && !isset($items[$key]['access callback'])) {
+      // Skip this
+      continue;
+    }
+    
+    // Initialize the access arguments, if needed
+    if (!isset($items[$key]['access arguments'])) {
+      $items[$key]['access arguments'] = array();
+    }
+    // Some modules do not implement hook_menu() correctly, 
+    // and provide a non-array for access arguments
+    else if (is_bool($items[$key]['access arguments'])) {
+      $items[$key]['access arguments'] = array($items[$key]['access arguments']);
+    }
+    
+    // Prepend the path to the array of access arguments
+    array_unshift($items[$key]['access arguments'], $key);
+    
+    // Prepend the module to the access arguments
+    if (!isset($items[$key]['module'])) {
+      // This is needed because Views that come in Features won't have a
+      // module specified
+      if (isset($items[$key]['page callback']) && $items[$key]['page callback'] == 'views_page') {
+        $items[$key]['module'] = 'views';
+      }
+      // Oddly, some menu items don't have a module attached to it
+      else {
+        $items[$key]['module'] = NULL;
+      }
+    } 
+    array_unshift($items[$key]['access arguments'], $items[$key]['module']);
+    
+    // Prepend the page arguments to the access arguments
+    $page_args = isset($items[$key]['page arguments']) ? $items[$key]['page arguments'] : array();
+    array_unshift($items[$key]['access arguments'], $page_args);
+    
+    // Prepend the page callback to the access arguments
+    $page_callback = isset($items[$key]['page callback']) ? $items[$key]['page callback'] : NULL;
+    array_unshift($items[$key]['access arguments'], $page_callback);
+    
+    // Prepend the access callback to the array of access arguments
+    $access_callback = !isset($items[$key]['access callback']) || !$items[$key]['access callback'] ? 'user_access' : $items[$key]['access callback'];
+    array_unshift($items[$key]['access arguments'], $access_callback);
+    
+    // Override the access callback
+    $items[$key]['access callback'] = 'og_features_menu_access_callback';
+  }
+}
+
+/**
+ * Implements hook_entity_load().
+ */
+function og_features_entity_load($entities, $type) {
+  // Group (OG) entities
+  if ($type == 'group') {
+    // Iterate each entity
+    foreach ($entities as $key => $group) {
+      // Add the original entity
+      $original_entity = entity_load($group->entity_type, array($group->etid));
+      $entities[$key]->entity = reset($original_entity);
+      // Determine and add the entity bundle
+      $entity_info = entity_get_info($group->entity_type);
+      $bundle_key = $entity_info['entity keys']['bundle'];
+      $entities[$key]->bundle_name = $entities[$key]->entity->$bundle_key;
+      // Add the disabled features for this group
+      og_features_load_disabled_features($entities[$key]);
+    }
+  }
+}
+
+/**
+ * Implements hook_theme().
+ */
+function og_features_theme() {
+  $path = drupal_get_path('module', 'og_features');
+  $items = array();
+  $items['og_features_feature_form'] = array(
+    'render element' => 'form',
+    'file' => 'og_features.theme.inc',
+    'path' => $path,
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_block_view_alter().
+ */
+function og_features_block_view_alter(&$data, $block) {
+  // Detect group context
+  if ($group = og_features_get_group_context()) {
+    // See if this is a view block
+    if ($block->module == 'views') {
+      // Determine the view name
+      $view = substr($block->delta, 0, strpos($block->delta, '-'));
+      // See if it's disabled for this group
+      if (og_features_component_is_disabled('views', $view, $group)) {
+        // Remove the block
+        $data = array();
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_og_ui_get_group_admin().
+ */
+function og_features_og_ui_get_group_admin() {
+  $items = array();
+  $items['og_features'] = array(
+    'title' => t('Features'),
+    'description' => t('Manage features for this group.'),
+    'href' => 'admin/features',
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_context_load_alter().
+ */
+function og_features_context_load_alter(&$context) {
+  // Detect the group context
+  if ($group = og_features_get_group_context()) {
+    // Check to see if we have at least one disabled feature
+    if (!empty($group->features_disabled)) {
+      // Load the og feature registry
+      $registry = og_features_get_registry();
+      // Iterate the disabled features
+      foreach ($group->features_disabled as $feature) {
+        // If this context belongs to this feature, remove it
+        if (og_features_in_feature($feature, 'context', $context->name)) {
+          $context->reactions = array();
+        }
+        // This feature may include a view block that should be removed
+        // from this context
+        // It should be noted that this case should not exist, as it's
+        // recommended that you wrap all your blocks in contexts that
+        // belong to your feature, to avoid cross-requirements.
+        else if (is_array($context->reactions['block']['blocks'])) {
+          // Iterate the blocks in this context
+          foreach ($context->reactions['block']['blocks'] as $key => $block) {
+            // See if this block comes from views
+            if ($block['module'] == 'views') {
+              // Extract the view name
+              $view = substr($block['delta'], 0, strpos($block['delta'], '-block'));
+              // If this view belongs to this feature, remove it
+              if (og_features_in_feature($feature, 'views', $view)) {
+                unset($context->reactions['block']['blocks'][$key]);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_form_views_exposed_form_alter().
+ */
+function og_features_form_views_exposed_form_alter(&$form, &$form_state) {
+  // Detect the group context
+  if ($group = og_features_get_group_context()) {
+    // If this is a node-type filter
+    if (isset($form['type'])) {
+      // Iterate all the available types
+      foreach ($form['type']['#options'] as $type => $name) {
+        // Only allow group post type options
+        if ($type != 'All' && !og_is_group_post_type($type)) {
+          unset($form['type']['#options'][$type]);
+        }
+        
+        // If features are disabled, remove disabled node types
+        if (og_features_component_is_disabled('node', $type, $group)) {
+          unset($form['type']['#options'][$type]);
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_form_alter().
+ */
+function og_features_form_alter(&$form, &$form_state, $form_id) {
+  /*
+  // Check if this is a node form
+  if (isset($form['#node_edit_form']) && $form['#node_edit_form']) {
+    // Extract the node from the form
+    if ($node = $form['#node']) {
+      // Check if this is a group content type
+      if (og_is_group_content_type('node', $node->type)) {
+        // Find the group audience widget
+        if (isset($form[OG_AUDIENCE_WIDGET])) {
+          // @todo in order to remove groups from the selection list
+          // that have this node type disabled we would need to load
+          // every single entity individually, and that could cause big
+          // problems
+        }
+      }
+    }
+  }
+  */
+}
+
+/**
+ * Implements hook_node_validate().
+ */
+function og_features_node_validate($node, $form, &$form_state) {
+  $gids = array();
+  
+  // See if this node has any attached groups for an audience
+  if (isset($node->{OG_AUDIENCE_FIELD})) {
+    foreach ($node->{OG_AUDIENCE_FIELD}[LANGUAGE_NONE] as $value) {
+      if (isset($value['gid']) && is_numeric($value['gid'])) {
+        $gids[] = $value['gid'];
+      }
+    }
+  }
+
+  // If we've extracted a group audience, make sure the groups don't
+  // have this node type disabled
+  foreach (og_load_multiple($gids) as $group) {
+    // Iterate each disabled feature
+    if (isset($group->features_disabled)) {
+      foreach ($group->features_disabled as $feature) {
+        if (og_features_component_is_disabled('node', $node->type, $group)) {
+          form_set_error(OG_AUDIENCE_FIELD, t('The group, %group, has disabled this content type.', array('%group' => check_plain($group->label))));
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_panels_pre_render().
+ */
+function og_features_panels_pre_render($display) {
+  // Detect group context
+  if ($group = og_features_get_group_context()) {
+    // Make sure we have at least one disabled feature
+    if (!empty($group->features_disabled)) {
+      // Iterate the available panes
+      foreach ($display->content as $key => $pane) {
+        // If this pane is part of a disabled feature
+        if (og_features_component_is_disabled('pane', $pane->subtype, $group)) {
+          // Remove it
+          unset($display->content[$key]);
+        }
+        // Check if this is a view
+        else if (substr($pane->subtype, 0, 6) == 'views-') {
+          // Extract the view name
+          $view = substr($pane->subtype, 6);
+          if ($dash = strpos($view, '-')) {
+            $view = substr($view, 0, $dash);
+          }
+          // See if the view is  part of a disabled feature
+          if (og_features_component_is_disabled('views', $view, $group)) {
+            // Remove it
+            unset($display->content[$key]); 
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Access callback for the group features form
+ * 
+ * @param $entity_type
+ *   The group entity_type
+ * @param $entity_id
+ *   The group entity_id
+ * @return
+ *   TRUE if the user has access to view the form, otherwise FALSE
+ */
+function og_features_feature_form_access($entity_type, $entity_id) {
+  global $user;
+
+  // Load the group
+  if (!($group = og_get_group($entity_type, $entity_id))) {
+    return FALSE;
+  }
+
+  // Administers always have access
+  if (user_access('administer og features') || user_access('edit all group features')) {
+    return TRUE;
+  }
+
+  // Check if the user can edit their own group features or is a group admin
+  if (og_user_access($group->gid, 'edit own group features') || og_user_access($group->gid, 'administer group')) {
+    return TRUE;
+  }
+  
+  return FALSE;
+}
+
+/**
+ * Menu access callback used for every menu item
+ */
+function og_features_menu_access_callback() {
+  // Extract the function arguments
+  $access_args = func_get_args();
+  // Extract the original access callback from the arguments
+  $access_callback = array_shift($access_args);
+  // Extract the page callback from the arguments
+  $page_callback = array_shift($access_args);
+  // Extract the page callback from the arguments
+  $page_args = array_shift($access_args);
+  // Extract the module from the arguments
+  $module = array_shift($access_args);
+  // Extract the path from the arguments
+  $path = array_shift($access_args);
+
+  // Detect a group context
+  if ($group = og_features_get_group_context(TRUE)) {
+    // Only proceed if there is at least one disabled feature
+    if (!empty($group->features_disabled)) {
+      // If the module matches a disabled feature, deny access
+      if (in_array($module, $group->features_disabled)) {
+        return FALSE;
+      }
+      
+      // If the path is inside a disabled feature, deny access
+      if (og_features_component_is_disabled('path', $path, $group)) {
+        return FALSE;
+      }
+      
+      // See if we have a menu access function to support this module
+      // @todo: make this cleaner somehow
+      $func = "og_features_menu_access_callback_{$module}";
+      
+      if (function_exists($func)) {
+        // Build an array of arguments
+        $data = array(
+          'group' => $group,
+          'page callback' => $page_callback,
+          'page arguments' => $page_args,
+          'access callback' => $access_callback,
+          'access arguments' => $access_args,
+        );
+        
+        // Execute the function to see if we should deny access
+        if (!$func($data)) {
+          return FALSE;
+        }
+      }
+    }
+  }
+
+  // If we've made it here, check the original access callback
+  if (is_string($access_callback)) {
+    if ($access_callback == 'user_access' && empty($access_args)) {
+      return TRUE;  
+    }
+
+    return call_user_func_array($access_callback, $access_args);
+  }
+  else {
+    return TRUE;
+  }
+}
+
+/**
+ * Fetch the registry of og features
+ * 
+ * @param $feature
+ *   Optionally specify the feature you want to retrieve registry 
+ *   information for. If omitted, all features will be returned.
+ * @param $reset
+ *   If TRUE, the registry will be regenerated, rather than taken from
+ *   the cache. Defaults to FALSE.
+ * @return
+ *   An array of registry information
+ */
+function og_features_get_registry($feature = NULL, $reset = FALSE) {
+  static $registry = NULL;
+  $cache_key = 'og_features:registry';
+  $hook = 'og_features_registry';
+  
+  // If the registry isn't available in the static cache,
+  // try the normal cache
+  if (!$reset && $registry === NULL) {
+    if ($cache = cache_get($cache_key)) {
+      $registry = $cache->data;
+    }
+  }
+  
+  // Regenerate the registry, if needed
+  if ($reset || ($registry === NULL) || ($feature && !isset($registry[$feature]))) {
+    // Invoke other modules to populate the registry
+    $registry = module_invoke_all($hook);
+    // Allow other modules to alter the registry
+    drupal_alter($hook, $registry);
+    // Cache the registry
+    cache_set($cache_key, $registry, 'cache', CACHE_TEMPORARY);
+  }
+  
+  // Return information for just one feature, if requested
+  if ($feature) {
+    return isset($registry[$feature]) ? $registry[$feature] : NULL;
+  }
+  
+  return $registry;
+}
+
+/**
+ * Load and attach the disabled features for a given group
+ * 
+ * @param &$group
+ *   A group entity object
+ * @param $reset
+ *   TRUE if the list is disabled features should be re-generated
+ */
+function og_features_load_disabled_features(&$group, $reset = FALSE) {
+  static $disabled = array();
+  
+  // Regenerate the disabled features list, if needed
+  if ($reset || !isset($disabled[$group->gid])) {
+    $disabled[$group->gid] = array();
+    
+    // Fetch the feature settings from the database for this group
+    $result = db_select('og_features', 'ogf')
+      ->fields('ogf', array('settings'))
+      ->condition('ogf.gid', $group->gid)
+      ->execute()
+      ->fetchField();
+    $features = $result ? unserialize($result) : array();
+    
+    // Gather the disabled features
+    foreach ($features as $feature => $status) {
+      if (!$status) {
+        $disabled[$group->gid][$feature] = $feature;
+      }
+    }
+    
+    // Check if the admin settings options for this group type
+    if ($settings = og_features_get_entity_type_settings($group->entity_type, $group->bundle_name)) {
+      foreach ($settings as $key => $setting) {
+        switch ($setting) {
+          // If this feature should always be disabled, add it
+          case OG_FEATURES_ADMIN_DISABLED:
+            $disabled[$group->gid][$key] = $key;
+            break;
+            
+          // If this feature should always be enabled, remove it
+          case OG_FEATURES_ADMIN_ENABLED:
+            unset($disabled[$group->gid][$key]);
+            break;
+            
+          // If this feature should default to disabled, see if
+          // the option hasn't been set, and disable if needed
+          case OG_FEATURES_ADMIN_TOGGLE_DISABLED:
+            if (!isset($features[$key])) {
+              $disabled[$group->gid][$key] = $key;
+            }
+            break;
+        }
+      }
+    }
+    
+    // Allow other modules to alter the disabled list
+    drupal_alter('og_features_disabled', $disabled[$group->gid], $group);
+  }
+  
+  $group->features_disabled = $disabled[$group->gid];
+}
+
+/**
+ * Check if a given feature is disabled for a given group
+ * 
+ * @param $feature
+ *   The name of the feature
+ * @param $group
+ *   Optionally supply the group object, otherwise use the current
+ * @return
+ *   TRUE if the feature is disabled for the given group, or if not
+ *   in a group context, otherwise FALSE
+ */
+function og_features_feature_is_disabled($feature, $group = NULL) {
+  // Detect the current group if group not supplied
+  if (!$group) {
+    if (!($group = og_features_get_group_context())) {
+      // If no group, then return as disabled
+      return TRUE;
+    }
+  }
+  
+  // Check if the disabled features have been loaded
+  if (!isset($group->features_disabled)) {
+    og_features_load_disabled_features($group);
+  }
+  
+  return isset($group->features_disabled[$feature]);
+}
+
+/**
+ * Check if a given feature component is disabled for a given group
+ * 
+ * @param $type
+ *   The type of component (views, node, context)
+ * @param $name
+ *   The name of the component
+ * @param $group
+ *   Optionally supply the group object, otherwise use the current
+ * @return
+ *   TRUE if the feature component is disabled for the given group, or if not
+ *   in a group context, otherwise FALSE
+ */
+function og_features_component_is_disabled($type, $name, $group = NULL) {
+  // Detect the current group if group not supplied
+  if (!$group) {
+    if (!($group = og_features_get_group_context())) {
+      // If no group, then return as disabled
+      return TRUE;
+    }
+  }
+  
+  // Check if the disabled features have been loaded
+  if (!isset($group->features_disabled)) {
+    og_features_load_disabled_features($group);
+  }
+  
+  // Iterate the disabled features to see if the component is part
+  // of one of them
+  foreach ($group->features_disabled as $feature) {
+    if (og_features_in_feature($feature, $type, $name)) {
+      return TRUE;
+    }
+  }
+  
+  return FALSE;
+}
+
+/**
+ * Determine if a component is part of a given feature
+ * 
+ * @param $feature
+ *   The name of the feature to check
+ * @param $type
+ *   The type of component
+ * @param $name
+ *   The name of the component
+ * @return
+ *   TRUE if the component is located inside the feature, otherwise
+ *   FALSE
+ */
+function og_features_in_feature($feature, $type, $name) {
+  // Load the og features registry
+  $registry = og_features_get_registry();
+
+  // See if the component is in the feature
+  if (isset($registry[$feature]->components[$type])) {
+    if (in_array($name, $registry[$feature]->components[$type])) {
+      return TRUE;
+    }
+  }
+      
+  return FALSE;
+}
+
+/**
+ * Save the feature settings for a group
+ * 
+ * @param $group
+ *   The group entity object
+ * @param $features
+ *   An array, keyed with features, with values for their status
+ */
+function og_features_save_feature_settings($group, $features = array()) {
+  // Log the event
+  watchdog('og_features', 'Group features changed for group: @group', array('@group' => $group->label));
+
+  // Remove any old settings
+  db_delete('og_features')
+    ->condition('gid', $group->gid)
+    ->execute();
+  
+  // Save the new settings
+  db_insert('og_features')
+    ->fields(
+      array(
+        'gid' => $group->gid,
+        'settings' => serialize($features),
+      )
+    )
+    ->execute();
+}
+
+/**
+ * Determine whether or not a given feature can be toggled within
+ * a given group (or group type)
+ * 
+ * This is based on the admin settings for each group type. This function
+ * does not check for actual access permissions. For that, see 
+ * og_features_feature_form_access().
+ * 
+ * @param $group
+ *   A group entity object
+ * @return
+ *   TRUE if the feature can be toggled within this group
+ */
+function og_features_feature_can_toggle($group, $feature) {
+  // Extract the feature ID
+  $feature = is_object($feature) ? $feature->id : $feature;
+  
+  // Fetch the settings for this group type, if any
+  if ($settings = og_features_get_entity_type_settings($group->entity_type, $group->bundle_name)) {
+    return !isset($settings[$feature]) || 
+      (($settings[$feature] == OG_FEATURES_ADMIN_TOGGLE_ENABLED) || ($settings[$feature] == OG_FEATURES_ADMIN_TOGGLE_DISABLED));
+  }
+  
+  return TRUE;
+}
+
+/**
+ * Return the group entity type settings for features
+ * 
+ * @param $entity_type
+ *   The entity type
+ * @param $bundle_name
+ *   The entity bundle name
+ * @return
+ *   An array of settings keyed by feature ID, or NULL if there are
+ *   no settings
+ */
+function og_features_get_entity_type_settings($entity_type, $bundle_name) {
+  return variable_get("og_features_settings_{$entity_type}_{$bundle_name}", NULL);
+}
+
+/**
+ * Determine the current group context
+ * 
+ * This is more robust, and safer than just og_context(), which also
+ * has several critical issues outstanding:
+ *   @see http://drupal.org/node/1781218
+ *   @see http://drupal.org/node/1781386
+ * 
+ * @param $menu_access
+ *   TRUE if this is being called within a menu access callback;
+ *   defaults to FALSE.
+ * @param $reset
+ *   TRUE if the static cache should be bypassed; defaults to FALSE.
+ * @return
+ *   A group entity object, if there is a current group context, 
+ *   otherwise NULL.
+ */
+function og_features_get_group_context($menu_access = FALSE, $reset = FALSE) {
+  static $context = FALSE;
+  
+  // See if we have a context cached, or need to reset
+  if ($context === FALSE || $reset) {
+    // Initialize the static cache
+    $context = NULL;
+    // See if this request is for a menu access callback
+    // @see http://drupal.org/node/1781218
+    if ($menu_access) {
+      module_load_include('inc', 'og_features', 'includes/overrides.og_context');
+      $context = og_features_og_context();
+    }
+    else {
+      // Attempt to fetch the context normally
+      $context = og_context();
+    }
+    // See if we still need to search for a context
+    if (!$context) {
+      // Determine which function to use to get the menu item
+      $menu_item_function = $menu_access ? '_og_features_menu_get_item' : 'menu_get_item';
+      // Get the current menu item
+      if ($menu_item = call_user_func($menu_item_function)) {
+        $entity_type = NULL;
+        $entity_id = NULL;
+        $entity = NULL;
+        $entity_info = entity_get_info();
+        // Iterate the map to determine if we have an entity, entity type
+        // or entity id
+        // @see http://drupal.org/node/1781386
+        if (isset($menu_item['map']) && is_array($menu_item['map'])) {
+          // @todo: make this more reliable
+          foreach ($menu_item['map'] as $arg) {
+            if (is_string($arg) && !$entity_type && $arg != 'group' && isset($entity_info[$arg])) {
+              $entity_type = $arg;
+            }
+            if (!$entity_id && is_numeric($arg)) {
+              $entity_id = $arg;
+            }
+            if (!$entity && is_object($arg)) {
+              $entity = $arg;
+            }
+          }
+        }
+        // See if we have entity data to work with
+        if ($entity_type) {
+          // Check if we have an entity but no entity_id
+          if ($entity && !$entity_id) {
+            // When creating a comment on a node, the entity found is the node,
+            // not the comment, so get its type.
+            if ($entity_type == 'comment') {
+              $entity_type = $entity->type;
+            }
+            // Extract the entity id
+            list($entity_id) = entity_extract_ids($entity_type, $entity);
+          }
+          // Check if we have an entity_id now
+          if ($entity_id) {
+            // Attempt to load the group
+            $context = og_get_group($entity_type, $entity_id);
+          }
+          // Check if we now have a context
+          if ($context) {
+            // Set the group context
+            og_context($context);
+          }
+        }
+      }
+    }
+  }
+  
+  return $context;
+}
+
+/**
+ * Module-specific menu access handlers ===============================
+ * 
+ * @see 
+ *   og_features_menu_access_callback()
+ */
+ 
+function og_features_menu_access_callback_views($data) {
+  // Determine the view ID
+  if ($view_id = $data['page arguments'][0]) {
+    // If this view is part of a disabled feature, deny access
+    if (og_features_component_is_disabled('views', $view_id, $data['group'])) {
+      return FALSE;
+    }
+  }
+  
+  return TRUE;
+}
+
+function og_features_menu_access_callback_node($data) {
+  // Only react to node add pages
+  if ($data['page callback'] == 'node_add') {
+    // Extract the node type
+    $type = isset($data['access arguments'][1]) ? $data['access arguments'][1] : NULL;
+    if ($type) {
+      // If this node is part of a disabled feature, deny access
+      if (og_features_component_is_disabled('node', $type, $data['group'])) {
+        return FALSE;
+      }
+    }
+  }
+  
+  return TRUE;
+}

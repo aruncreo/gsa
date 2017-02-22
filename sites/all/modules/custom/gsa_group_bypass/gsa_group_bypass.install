@@ -1,0 +1,78 @@
+<?php
+
+/**
+ * Implements hook_schema().
+ */
+function gsa_group_bypass_schema() {
+  $schema = array();
+  
+  $schema['gsa_group_bypass'] = array(
+    'description' => 'Store the group settings for who can always join a given group',
+    'fields' => array(
+      'gid' => array(
+        'description' => 'The group id.',
+        'type' => 'int',
+        'not null' => TRUE
+      ),
+      'setting' => array(
+        'description' => 'The chosen setting for group joining',
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0
+      ),
+    ),
+    'primary key' => array('gid'),
+  );
+
+  return $schema;
+}
+
+/**
+ * Update to the new schema which uses gid instead of nid
+ */
+function gsa_group_bypass_update_7000() {
+  // Ensure OG7 has been updated before proceeding
+  if (drupal_get_installed_schema_version('og', TRUE) < 7000) {
+    throw new DrupalUpdateException('Organic groups must update before GSA Group Bypass can. Try running update.php again.');
+    return;
+  }
+  
+  $table = 'gsa_group_bypass';
+  
+  // Fetch all existing data
+  $records = db_select($table, 'g')
+    ->fields('g')
+    ->execute()
+    ->fetchAllAssoc('nid');
+    
+  // Fetch the group ids for these nodes
+  if (!empty($records)) {
+    $gids = db_select('og')
+      ->fields('og', array('gid', 'etid'))
+      ->condition('entity_type', 'node')
+      ->condition('etid', array_keys($records), 'IN')
+      ->execute()
+      ->fetchAllAssoc('etid');
+    
+    // Swap nids for gids
+    foreach ($records as $nid => $record) {
+      $records[$nid]->gid = $gids[$nid]->gid;
+      unset($records[$nid]->nid);
+    }
+  }
+  
+  // Drop the old table
+  db_drop_table($table);
+  
+  // Create the new table
+  $schema = gsa_group_bypass_schema();
+  db_create_table($table, $schema[$table]);
+  
+  // Insert the records
+  foreach ($records as $record) {
+    db_insert($table)
+      ->fields((array) $record)
+      ->execute();
+  }
+}
+

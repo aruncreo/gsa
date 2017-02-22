@@ -1,0 +1,13 @@
+name = Modal Frame API
+description = Provides an API to render an iframe within a modal dialog based on the jQuery UI Dialog plugin.
+package = User interface
+dependencies[] = jquery_update
+core = 7.x
+files[] = modalframe.module
+
+; Information added by drupal.org packaging script on 2011-02-25
+version = "7.x-1.x-dev"
+core = "7.x"
+project = "modalframe"
+datestamp = "1298619668"
+

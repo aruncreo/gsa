@@ -1,0 +1,135 @@
+<?php
+/**
+ * @file user_relationship_locator.module
+ *   Administrative functionality, each individual providers info located within individual submodules
+ */
+module_load_include('inc', 'user_relationship_locator', 'user_relationship_locator.api');
+
+/**
+ * Implementation of hook_perm().
+ */
+function user_relationship_locator_permission() {
+  return array(
+    'administer user relationship locator' => array(
+      'title' => t('Administer relationship location'),
+      'description' => t('Perform administration tasks for User Relationship Locator.'),
+    ),
+    'locate relationships' => array(
+      'title' => t('Locate relationships'),
+      'description' => t('Locate relationships using User Relationship Locator.'),
+    ),
+  );
+}
+
+
+/**
+ * Implementation of hook_cron().
+ */
+
+function user_relationship_locator_cron() {
+  //query these potentially large tables as infrequently as possible
+  //submodules should try and use the stored uid values rather than querying their 'own' network
+  module_invoke_all('urlocator_network_update');
+}
+
+/**
+ * Implementation of hook_menu().
+ */
+function user_relationship_locator_menu() {
+  $items['admin/config/people/locator'] = array(
+    'title' => 'Relationship Locator',
+    'description' => 'Configure how results are returned to the relationship locator.',
+    'page callback' => 'drupal_get_form', 'page arguments' => array('user_relationship_locator_admin'),
+    'access arguments' => array('administer user relationship locator'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+  return $items;
+}
+
+/**
+ * Implementation of hook_block_info().
+ */
+function user_relationship_locator_block_info() {
+  $blocks['default'] = array(
+    'info' => t('People you may know'),
+    'cache' => DRUPAL_CACHE_PER_USER,
+  );
+  return $blocks;
+}
+
+/**
+ * Implementation of hook_block_view().
+ */
+function user_relationship_locator_block_view($delta = '') {
+  switch ($delta) {
+    case 'default':
+      $block['subject'] = t('People you may know.');
+      $block['content'] = array(
+        '#theme' => 'user_relationship_locator_default_block',
+      );
+      return $block;
+      break;
+  }
+}
+
+/**
+ * Implementation of hook_theme().
+ */
+function user_relationship_locator_theme($existing, $type, $theme, $path) {
+  global $user;
+  $requester = $user;
+  $relationship = user_relationships_type_load(variable_get('user_relationship_locator_relationship','0'));
+
+  return array(
+    'user_relationship_locator_default_block' => array(
+      'variables' => array('requester' => $requester, 'requestee' => NULL, 'relationship' => $relationship),
+      'template' => 'user_relationship_locator_default_block',
+    ),
+    'user_relationship_locator_default_block_item' => array(
+      'variables' => array('requester' => $requester, 'requestee' => NULL, 'relationship' => $relationship),
+      'template' => 'user_relationship_locator_default_block_item',
+    ),
+  );
+}
+
+/**
+ * Admin page callback.
+ */
+function user_relationship_locator_admin() {
+  $form['#attributes'] = array(
+    'class' => array('user-relationship-locator-form'),
+  );
+
+  $rels = user_relationships_types_load();
+  $options = array('please create a relationship');
+  if(!empty($rels)) {
+    $options = array();
+    foreach($rels as $key => $value) {
+      $options[$key] = $value->name;
+    }
+  }
+  $form['user_relationship_locator_relationship'] = array(
+    '#title' => t('Relationship'),
+    '#type' => 'select',
+    '#options' => $options,
+    '#default_value' => variable_get('user_relationship_locator_relationship',''),
+    '#description' => t('Please select the relationship to use for matches.'),
+  );
+  $form['user_relationship_locator_min'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Minimum number of matches to return.'),
+    '#description' => t('If the enabled data submodules do not return this number random users will be added to the list until this number is reached.'),
+    '#default_value' => variable_get('user_relationship_locator_min',''),
+    '#maxlength' => 3,
+    '#size' => 3,
+  );
+  $form['user_relationship_locator_max'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Maximum number of matches to return.'),
+    '#description' => t('The largest number of users that will be displayed regardless of the number of returned matches, reducing this number may increase performance on larger sites.'),
+    '#default_value' => variable_get('user_relationship_locator_max',''),
+    '#maxlength' => 3,
+    '#size' => 3,
+  );
+  return system_settings_form($form);
+}

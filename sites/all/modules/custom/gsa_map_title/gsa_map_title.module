@@ -1,0 +1,27 @@
+<?php
+
+/**
+ * @file gsa_map_title  module
+ */
+
+/**
+* Implements hook_views_api().
+*/
+function gsa_map_title_views_api(){
+  return array(
+    'api' => 3,
+	'path' => drupal_get_path('module','gsa_map_title').'/include',
+  );
+}
+
+/**
+* 
+* Implements hook_leaflet_map_info_alter().
+* 
+* @param $map_info
+*   The map information array
+*/
+function gsa_map_title_leaflet_map_info_alter(&$map_info){
+  // Setting the default zoom level of map on page load
+  $map_info['OSM Mapnik']['settings']['zoom'] = 4;
+}

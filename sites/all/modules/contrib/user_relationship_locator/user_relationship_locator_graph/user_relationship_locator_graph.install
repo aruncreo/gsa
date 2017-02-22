@@ -1,0 +1,25 @@
+<?php
+/**
+ * @file
+ * Installation functions for relationship graph submodule.
+ */
+
+/**
+ * Implements hook_install.
+ */
+function user_relationship_locator_graph_install() {
+  $users = array();
+  user_relationship_locator_network_create('graph',$users);
+  drupal_set_message('Graph network created for user relationship locator');
+}
+
+/**
+ * Implements hook_uninstall.
+ */
+function user_relationship_locator_graph_uninstall() {
+  variable_del('user_relationship_locator_graph_depth');
+  db_delete('user_relationship_locator')
+    ->condition('netname', 'graph')
+    ->execute();
+  drupal_set_message('Graph network for user relationship locator deleted');
+}

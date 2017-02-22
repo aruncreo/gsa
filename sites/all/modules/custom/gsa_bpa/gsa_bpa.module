@@ -1,0 +1,194 @@
+<?php
+
+include_once('gsa_bpa.features.inc');
+
+/**
+ * @file
+ * Provides CSV upload functionality for BPA listings.
+ */
+
+/**
+ * Implementation of hook_menu().
+ */
+function gsa_bpa_menu() {
+  $items = array();
+  
+  $items['admin/content/bpa_listing'] = array(
+    'title' => 'Import BPA data',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('bpa_listing_import_form'),
+    'access callback' => 'node_access',
+    'access arguments' => array('create', 'bpa_listing'),
+    'file' => 'gsa_bpa.admin.inc',
+    'type' => MENU_LOCAL_TASK,
+  );
+  
+  $items['admin/config/bpa_listing'] = array(
+    'title' => 'BPA Listing',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('bpa_listing_settings_form'),
+    'access arguments' => array('administer nodes'),
+    'file' => 'gsa_bpa.admin.inc',
+    'type' => MENU_LOCAL_TASK,
+  );
+  
+  return $items;
+}
+
+/**
+ * Implementation of hook_enable().
+ */
+function gsa_bpa_enable() {
+  //clear the cache to display in Feeds as available plugin.
+  cache_clear_all('plugins:feeds:plugins', 'cache');
+}
+
+/**
+ * Implementation of hook_feeds_plugins().
+ */
+function gsa_bpa_feeds_plugins() {
+  $path = drupal_get_path('module', 'gsa_bpa') .'/plugins';
+  $info = array();
+  /* $info['SOAPFetcher'] = array(
+    'name' => 'SOAP Fetcher',
+    'description' => 'Fetches SOAP feed.',
+    'handler' => array(
+      'parent' => 'FeedsFetcher', // A plugin needs to derive either directly or indirectly from FeedsFetcher, FeedsParser or FeedsProcessor.
+      'class' => 'FeedsSOAPFetcher',
+      'file' => 'FeedsSOAPFetcher.inc',
+      'path' => $path,
+    ),
+  );
+  $info['BPANodeProcessor'] = array(
+    'name' => 'BPA Node processor',
+    'description' => 'Create and update nodes based on BPA data.',
+    'help' => 'Create and update nodes from parsed BPA content.',
+    'handler' => array(
+      'parent' => 'FeedsNodeProcessor',
+      'class' => 'BPANodeProcessor',
+      'file' => 'BPANodeProcessor.inc',
+      'path' => $path,
+    ),
+  ); */
+  
+  return $info;
+}
+
+/**
+ * Implementation of hook_form_FORM_ID_alter().
+ *
+ * @todo Hide the groups form and auto-populate it with the group set in the
+ * admin settings form.
+ */
+function gsa_bpa_form_bpa_listing_node_form_alter(&$form, &$form_state) {
+  
+}
+
+/**
+ * Implementation of hook_form_FORM_ID_alter().
+ *
+ * Alter the OG Features selection form
+ */
+function gsa_bpa_form_og_features_feature_form_alter(&$form, &$form_state) {
+  // Remove the option for the BPA feature
+  unset($form['feature-bpa']);
+}
+
+/**
+ * Implementation of hook_og_features_registry()
+ */
+function gsa_bpa_og_features_registry() {
+  $registry = array();
+  
+  // Feature: bpa
+  $feature = new stdClass;
+  $feature->id = 'bpa';
+  $feature->name = t('BPA data');
+  $feature->description = t('BPA data listings');
+  $feature->components = array(
+    'views' => array(
+      'gsa_bpa_listings',
+    ),
+    'node' => array(
+      'bpa_listing',
+    ),
+  );
+  $registry[$feature->id] = $feature;
+  
+  return $registry;
+}
+
+/**
+ * Implementation of hook_og_features_disabled_alter()
+ */
+function gsa_bpa_og_features_disabled_alter(&$disabled, $group) {
+  // If this group is not the BPA group
+  if ($group->nid != variable_get('bpa_listing:group', 0)) {
+    // Force-disable the BPA feature
+    $disabled['bpa'] = 'bpa';
+  }
+}
+
+/**
+ * Implement hook_feeds_node_processor_targets_alter().
+ *
+ * - Override the socio-economic field target handler
+ *   as its value can be space-delimited and multi-valued.
+ *
+ * - Override the URL handlers to encode non RFC compliant characters.
+ */
+function gsa_bpa_feeds_node_processor_targets_alter(&$targets, $content_type) {
+	if ($content_type == 'bpa_listing') {
+    $targets['field_bpa_listing_socioeconomic'] = array(
+      'name' => t('Socio-economic Field'),
+      'description' => t('Map the multivalued socio-economic indicator value(s).'),
+      'callback' => 'gsa_bpa_set_socioeconomic_value',
+    );
+	}
+}
+
+/**
+ * Implement hook_feeds_after_parse().
+ *
+ * Clean up or modify data as needed.
+ */
+function gsa_bpa_feeds_after_parse(FeedsImporter $importer, FeedsSource $source) {
+  foreach ($source->batch->items as $item_key => $item) {
+    foreach ($item as $key => $value) {
+      if ($key == 'view terms and conditions' || $key == 'view items') {
+        $value = gsa_bpa_cleanup_url($value);
+      }
+    }
+  }
+}
+
+
+/**
+ * callback to set the socio-economic field value
+ * @param unknown_type $node
+ * @param unknown_type $target
+ * @param unknown_type $value
+ */
+function gsa_bpa_set_socioeconomic_value($node, $target, $value) {
+  if (is_string($value)) {
+	  $statuses = array();
+	  preg_match_all('@\([a-zA-Z0-9]+\)@', $value, $matches);
+	  foreach ($matches[0] as $status) {
+  	  $statuses[] = array('value' => strtolower($status));
+	  }
+  }
+  $node->$target = $statuses;
+}
+
+/**
+ * Callback to encode illegal characters in URL.
+ */
+function gsa_bpa_cleanup_url($value) {
+/*
+  preg_match('/^(?:https?|ftp|feed):\/\//i', $value, $matches);
+  foreach ($matches as $protocol) {
+    $value = array('url' => $protocol . drupal_urlencode(str_replace($protocol, '', $value)));
+  }
+*/
+  return str_replace(' ', '%20', trim($value));
+}

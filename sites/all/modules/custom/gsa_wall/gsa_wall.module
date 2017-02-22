@@ -1,0 +1,405 @@
+<?php
+
+include_once('gsa_wall.features.inc');
+
+/**
+ * Implements hook_init().
+ */
+function gsa_wall_init() {
+  drupal_add_js(array('refreshInterval' => variable_get('wh-refresh-time', 60)), 'setting');
+  drupal_add_js(drupal_get_path('module', 'gsa_wall') . '/jquery.watermark.min.js', array('scope' => 'footer'));
+  drupal_add_js(drupal_get_path('module', 'gsa_wall') . '/jquery.mousewheel-3.0.4.pack.js', array('scope' => 'footer'));
+  drupal_add_js(drupal_get_path('module', 'gsa_wall') . '/jquery.jscrollpane.min.js', array('scope' => 'footer'));
+  drupal_add_js(drupal_get_path('module', 'gsa_wall') . '/gsa_wall.js', array('scope' => 'footer'));
+  drupal_add_css(drupal_get_path('module', 'gsa_wall') . '/gsa_wall.css');
+}
+
+/**
+ * Implements hook_menu().
+ */
+function gsa_wall_menu() {
+  $items = array();
+
+  $items['admin/config/whats-happening'] = array(
+      'title' => 'Whats Happening',
+      'description' => "Configure What's happening block.",
+      'page callback' => 'gsa_wall_whats_happening_config',
+      'access arguments' => array('access administration pages'),
+      'type' => MENU_NORMAL_ITEM,
+  );
+
+  $items['user/%user/gsa-settings'] = array(
+      'title' => 'My Settings',
+      'description' => "GSA - User settings.",
+      'page callback' => 'gsa_wall_user_config',
+      'access callback' => 'user_is_logged_in',
+      'type' => MENU_NORMAL_ITEM,
+  );
+
+  $items['gsa-comment-submit'] = array(
+      'title' => 'Post Comment',
+      'description' => "",
+      'page callback' => 'gsa_wall_comment_submit',
+      'access arguments' => array('post comments'),
+      'type' => MENU_NORMAL_ITEM,
+  );
+
+  return $items;
+}
+
+/**
+ * Implements hook_theme_registry_alter().
+ */
+function gsa_wall_theme_registry_alter(&$theme_registry) {
+  $theme_registry['comment']['path'] = drupal_get_path('module', 'gsa_wall');
+}
+
+/**
+ * Implements hook_form_alter().
+ */
+function gsa_wall_form_alter(&$form, $form_state, $form_id) {
+  switch($form['#id']) {
+    case 'comment-form':
+      $form['#submit'][] = 'add_fancy_close_script';
+      break;
+  }
+}
+
+
+function gsa_wall_get_comment_form($nid, $pid = '') {
+  $node = node_load($nid);
+
+  if ($node->comment != '2' || !gsa_wall_user_comment_access($node)) {
+    return '';
+  }
+
+  $form = <<<commentform
+  <form id="comment-form-{$nid}" class="comment-form">
+    <input type="text" name="comment_text" maxlength="255" class="comment-form-text" />
+    <input type="hidden" name="nid" value="{$nid}" />
+  </form>
+commentform;
+
+  $output = '
+    <div id="comment-form-div-'. $nid .'" class="comment-form-div">'. $form .'</div>
+    <script type="text/javascript">if (typeof relocate_gsa_comment_form != "undefined") { relocate_gsa_comment_form(); }</script>
+  ';
+
+  return $output;
+}
+
+function gsa_wall_get_comment_form_link($data) {
+  if (gsa_wall_user_comment_access($data->_field_data['nid']['entity'])) {
+    return '<a class="fancy-link" href="#comment-form-div-'. $data->nid .'">comment</a>';
+  } else {
+    return '';
+  }
+}
+
+function gsa_wall_user_comment_access($node) {
+  $gsa_wall_user_comment_access_debug = &drupal_static(__FUNCTION__, FALSE);
+  
+  $node_groups = $node->group_audience[LANGUAGE_NONE];
+  $node_type = $node->type;
+  
+  foreach ($node_groups as $group_ref) {
+    if (og_user_access($group_ref['gid'], "post comment_node_" . $node_type)) {
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
+function gsa_wall_get_comments_list($nid) {
+  $alter = array(
+    'max_length' => 255,
+    'word_boundary' => TRUE,
+    'ellipsis' => TRUE,
+    'html' => TRUE,
+  );
+  $link_options = array(
+    'attributes' => array(
+      'target' => '_blank',
+      'class' => 'gsa-read-more-link',
+    ),
+  );
+
+  $node = node_load($nid);
+  $comment_thread = comment_get_thread($node, COMMENT_MODE_THREADED, 5);
+  $comments = comment_load_multiple($comment_thread);
+   $parentComments=array();
+  $revComments=array();
+  foreach($comments as $comment){
+      if($comment->pid==0){
+          $parentComments[]=$comment;
+      }
+      
+  }
+  $parentComments=array_reverse($parentComments);
+  foreach($parentComments as $parentComment){
+      $revComments[]=$parentComment;
+      foreach($comments as $comment){
+          if($comment->pid==$parentComment->cid){
+              $revComments[]=$comment;
+          }
+          
+      }
+      
+  }
+  $comments=$revComments;
+  foreach ($comments as $key => $value){
+    $comment_text = strip_tags($value->comment_body[LANGUAGE_NONE][0]['value']);
+    $strlen = strlen($comment_text);
+    if ($strlen >= 255) {
+      $path = url('comment/'. $value->cid, array('absolute' => true)) . '#comment-'.$value->cid;
+//      $comments[$key]->comment_body[LANGUAGE_NONE][0]['safe_value'] = substr($value->comment_body[LANGUAGE_NONE][0]['value'],0,255) . l('Read more',$path,array('attributes' => array('target' => '_blank','class' => 'gsa-read-more-link')));
+      $comments[$key]->comment_body[LANGUAGE_NONE][0]['safe_value'] = views_trim_text($alter, $comment_text) . l('Read more', $path, $link_options);
+    } else {
+      $comments[$key]->comment_body[LANGUAGE_NONE][0]['safe_value'] = $comment_text;
+	  $commentCount=flag_get_counts('comment',$value->cid);
+	  $comments[$key]->comment_body[LANGUAGE_NONE][0]['links_comment'] = flag_create_link('like_comments', $value->cid);
+
+
+    }
+  }
+  $build = comment_view_multiple($comments, $node);
+  $output = drupal_render($build);
+  return $output;
+}
+
+
+
+function add_fancy_close_script($form, &$form_state) {
+  //form_set_error('', '<script type="text/javascript">refreshViewCommentSubmitted();</script>');
+}
+
+
+function gsa_wall_whats_happening_config() {
+  $form = drupal_get_form('gsa_wall_whats_happening_config_form');
+
+  return $form;
+}
+
+
+function gsa_wall_whats_happening_config_form() {
+  $form  = array();
+
+  $form['wh-comments-per-block'] = array(
+      '#title' => t('Comments per block'),
+      '#type' => 'textfield',
+      '#default_value' => variable_get('wh-comments-per-block', 2),
+      '#required' => true,
+  );
+
+  $refresh_options = array(
+      '60' => t('1 Min'),
+      '120' => t('2 Min'),
+      '300' => t('5 Min'),
+      '900' => t('15 Min'),
+      '1800' => t('30 Min'),
+      '3600' => t('1 Hour'),
+      '7200' => t('2 Hours'),
+  );
+
+  $form['wh-refresh-time'] = array(
+      '#title' => t('Refresh time'),
+      '#type' => 'select',
+      '#options' => $refresh_options,
+      '#default_value' => variable_get('wh-refresh-time', 60),
+      '#required' => true,
+  );
+
+  return system_settings_form($form);
+}
+
+
+function gsa_wall_whats_happening_config_form_validate($form, &$form_state) {
+  if (!is_numeric($form_state['values']['wh-comments-per-block'])) {
+    form_set_error('wh-comments-per-block', t('Please enter numeric value for comments per block'));
+  }
+}
+
+
+
+
+function gsa_wall_user_config() {
+  $output = drupal_get_form('gsa_wall_user_config_form');
+
+  return $output;
+}
+
+
+function gsa_wall_user_config_form() {
+  global $user;
+
+  $refresh_time = $user->data['wh-refresh-time'] ? $user->data['wh-refresh-time'] : variable_get('wh-refresh-time', 60);
+
+  $refresh_options = array(
+      '60' => t('1 Min'),
+      '120' => t('2 Min'),
+      '300' => t('5 Min'),
+      '900' => t('15 Min'),
+      '1800' => t('30 Min'),
+      '3600' => t('1 Hour'),
+      '7200' => t('2 Hours'),
+  );
+
+  $form['wh-refresh-time'] = array(
+      '#title' => t('Refresh time'),
+      '#type' => 'select',
+      '#options' => $refresh_options,
+      '#default_value' => $refresh_time,
+      '#required' => true,
+  );
+
+
+}
+
+
+function gsa_wall_content_body($data) {
+  $alter = array(
+    'max_length' => 255,
+    'word_boundary' => TRUE,
+    'ellipsis' => TRUE,
+    'html' => TRUE,
+  );
+
+  $node = node_load($data->nid);
+  $node = node_view($node, "teaser");
+  
+  // Trim the body content to 255 chars
+  $node['body'][0]['#markup'] = (views_trim_text($alter, strip_tags($node['body'][0]['#markup'])));
+  
+  $content = render($node);
+
+  $content = "<div class='gsa-teaser'>". $content . "</div>". l('Read more', 'node/'. $data->nid, array('attributes' => array('class' => 'gsa-read-more-link')));
+  return $content;
+}
+
+function gsa_wall_comment_submit() {
+  global $user;
+
+  $nid = $_POST['nid'];
+  $comment_text = $_POST['comment_text'];
+  $comment = new stdClass();
+  $comment->nid = $nid;
+  $comment->uid = $user->uid;
+  $comment->comment_body[LANGUAGE_NONE][0]['value'] = $comment_text;
+  $comment->comment_body[LANGUAGE_NONE][0]['format'] = 'filtered_html';
+  comment_save($comment);
+
+//  drupal_get_messages();
+  $return['comment_list'] = gsa_wall_get_comments_list($nid);
+  print json_encode($return);
+  exit;
+}
+
+function gsa_wall_presort($view, $handler, $static) {
+}
+
+function gsa_wall_sort($row1, $row2){
+  $val1 = _gsa_wall_node_weights($row1);
+  $val2 = _gsa_wall_node_weights($row2);
+
+  if ($val1 > $val2) {
+    $return = -1;
+  } elseif ($val1 < $val2) {
+    $return = 1;
+  } else {
+    $return = 0;
+  }
+  return $return;
+}
+
+/**
+ * Calculate a sort weight for a node.
+ *
+ * @param $data
+ *   An object (row retrieved by Views query) representing a single node.
+ *
+ * @return
+ *   An integer representing sort weight.
+ */
+function _gsa_wall_node_weights($data) {
+  global $user;
+
+  // Array to cache node weights, indexed by nid.
+  $gsa_node_weights = &drupal_static(__FUNCTION__, array());
+
+  // Return the weight if cached and stop.
+  if (!empty($gsa_node_weights[$data->nid])) {
+    return $gsa_node_weights[$data->nid];
+  }
+
+  // Load the node with node_load_multiple to cache the loaded object?
+  $nids[] = $data->nid;
+  $my_nodes = node_load_multiple($nids);
+
+  // Determine weight scores for the node
+  foreach ($my_nodes AS $nid => $node) {
+    $latest_date = max($node->changed, $node->last_comment_timestamp);
+    $gsa_node_weights[$data->nid] = $latest_date;
+  }
+
+  return $gsa_node_weights[$data->nid];
+}
+
+/**
+ * Implementation of template_preprocess_comment().
+ */
+function gsa_wall_preprocess_comment(&$variables) {
+  $account = user_load($variables['comment']->uid);
+  $variables['picture'] = theme('user_picture', array('account' => $account, 'style' => 'user_bubble'));
+}
+
+/**
+ * Replacement theme preprocessor for user pictures to 
+ * accept an image style argument.
+ */
+function gsa_wall_preprocess_user_picture(&$variables) {
+  $variables['user_picture'] = '';
+  if (variable_get('user_pictures', 0)) {
+    $account = $variables['account'];
+    if (!empty($account->picture)) {
+      // @TODO: Ideally this function would only be passed file objects, but
+      // since there's a lot of legacy code that JOINs the {users} table to
+      // {node} or {comments} and passes the results into this function if we
+      // a numeric value in the picture field we'll assume it's a file id
+      // and load it for them. Once we've got user_load_multiple() and
+      // comment_load_multiple() functions the user module will be able to load
+      // the picture files in mass during the object's load process.
+      if (is_numeric($account->picture)) {
+        $account->picture = file_load($account->picture);
+      }
+      if (!empty($account->picture->uri)) {
+        $filepath = $account->picture->uri;
+      }
+    }
+    elseif (variable_get('user_picture_default', '')) {
+      $filepath = variable_get('user_picture_default', '');
+    }
+    if (isset($filepath)) {
+      $alt = t("@user's picture", array('@user' => format_username($account)));
+      // If the image does not have a valid Drupal scheme (for eg. HTTP),
+      // don't load image styles.
+      variable_get('user_picture_style', '');
+      if (module_exists('image') && file_valid_uri($filepath) && $style = variable_get('user_picture_style', '')) {
+         // Use the image style if provided in the list of arguments.
+        if (isset($variables['style'])) {
+          $style = $variables['style'];
+        }
+        $variables['user_picture'] = theme('image_style', array('style_name' => $style, 'path' => $filepath, 'alt' => $alt, 'title' => $alt));
+      }
+      else {
+        $variables['user_picture'] = theme('image', array('path' => $filepath, 'alt' => $alt, 'title' => $alt));
+      }
+      if (!empty($account->uid) && user_access('access user profiles')) {
+        $attributes = array(
+          'attributes' => array('title' => t('View user profile.')),
+          'html' => TRUE,
+        );
+        $variables['user_picture'] = l($variables['user_picture'], "user/$account->uid", $attributes);
+      }
+    }
+  }
+}

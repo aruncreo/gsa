@@ -1,0 +1,22 @@
+#gsa-get-to-know-block-content .item-list ul li::before {
+  content: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+#gsa-get-to-know-block-content ul {
+  margin: 0 !important;
+}
+
+#gsa-get-to-know-block-content ul li {
+  margin: 0 0 5px !important;
+}
+
+#gsa-get-to-know-block-content img {
+  margin: 0 5px 0 0 !important;
+  float: left;
+}
+
+#gsa-get-to-know-block-content a {
+  line-height: 42px;
+}

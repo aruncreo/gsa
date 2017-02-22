@@ -1,0 +1,204 @@
+<?php
+/* Create a list of all salesforce fields for a specified object type
+ * @param $form_sfobject_typecode Code for the SF object type
+ * @return $fields A list of fields for the object type
+ */
+/**
+ * @todo Please document this function.
+ * @see http://drupal.org/node/1354
+ */
+function salesforcewebform_fields_salesforcewebform_fields($form_sfobject_typecode) {
+  //Translate SF object type code to SF object names
+  switch ($form_sfobject_typecode) {
+    case "l":
+      $types = array('Lead');
+      break;
+    case "c":
+      $types = array('Contact');
+      break;
+    case "p":
+      $types = array('Account');
+      break;
+    case "a":
+      $types = array('Account');
+      break;
+    case "m":
+      $types = array('Contact', 'Account');
+      break;
+  }
+
+  $real_fields = salesforcewebform_fields_salesforce_api_describeSObjects(array('Lead', 'Contact', 'Account'));
+  if ($real_fields) {
+    foreach ($real_fields as $objtype) {
+      //Check to see if the current SF object is one of the ones this form uses.  If it is, add the fields to the list.
+      if (in_array($objtype->name, $types)) {
+        foreach ($objtype->fields as $key => $field) {
+          if ($field->name && $field->label && ($field->createable || $field->updateable)) {
+            if ($objtype->name == 'Lead' && $field->name == 'Company') {
+              $fields[$field->name] = $objtype->name . ':' . $field->label . ' (required special)';
+            }
+            elseif (!$field->nillable && $field->createable && !$field->defaultedOnCreate) {
+              $fields[$field->name] = $objtype->name . ':' . $field->label . ' (required)';
+            }
+            else {
+              $fields[$field->name] = $objtype->name . ':' . $field->label;
+            }
+          }
+        }
+      }
+    }
+  }
+  return $fields;
+}
+
+/**
+ * @todo Please document this function.
+ * @see http://drupal.org/node/1354
+ */
+function salesforcewebform_fields_salesforce_api_connect() {
+  //Get the path to the Toolkit, set in the options on install.
+  $toolkit_path = variable_get('salesforcewebform_toolkit_path', drupal_get_path('module', 'salesforcewebform') . "/includes");
+  //Ok, now use SOAP to send the information to Salesforce
+  //require_once($toolkit_path .'/soapclient/SforcePartnerClient.php');
+  require_once(DRUPAL_ROOT . '/' . $toolkit_path . '/soapclient/SforceEnterpriseClient.php');
+  require_once(DRUPAL_ROOT . '/' . $toolkit_path . '/soapclient/SforceHeaderOptions.php');
+  module_load_include('inc', 'salesforcewebform', '/salesforcewebform_fields');
+
+  // Salesforce Login information
+  //$wsdl = $toolkit_path . '/soapclient/partner.wsdl.xml';
+  $wsdl = $toolkit_path . '/soapclient/enterprise.wsdl.xml';
+  $userName = variable_get('salesforcewebform_user', NULL);
+  $password = variable_get('salesforcewebform_pw', NULL);
+
+  // Process of logging on and getting a salesforce.com session
+  //$client = new SforcePartnerClient();
+  $client = new SforceEnterpriseClient();
+  $client->createConnection($wsdl);
+  $loginResult = $client->login($userName, $password);
+  if ($loginResult == TRUE) {
+    return $client;
+  }
+  else {
+    drupal_set_message(t("There was an error connecting to Salesforce.  Check your login credentials."));
+  }
+}
+
+/**
+ * @todo Please document this function.
+ * @see http://drupal.org/node/1354
+ */
+function salesforcewebform_fields_salesforce_api_describeSObjects($types) {
+  $userName = variable_get('salesforcewebform_user', '');
+  $password = variable_get('salesforcewebform_pw', '');
+  static $objects;
+  if (is_string($types)) {
+    $types = array($types);
+  }
+  if (!is_array($types)) {
+    drupal_set_message(t('DescribeSObjects expects an array. @type received.', array('@type' => check_plain(gettype($types)))), 'error');
+    return FALSE;
+  }
+
+  // There is no reason to describe the same object twice in one HTTP request.
+  // Use a static cache to save API calls and bandwidth.
+  if (!empty($objects)) {
+    $outstanding = array_diff($types, array_keys($objects));
+    if (empty($outstanding)) {
+      $ret = array();
+      foreach ($types as $k) {
+        $ret[$k] = $objects[$k];
+      }
+      return $ret;
+    }
+  }
+
+  if (is_string($types)) {
+    $types = array($types);
+  }
+
+  try {
+    $sf = salesforcewebform_fields_salesforce_api_connect();
+    //$sf = new SforcePartnerClient();
+    //$sf->createConnection();
+    $loginResult = $sf->login($userName, $password);
+    if ($sf === FALSE) {
+      $link = l('Please verify that you have completed your Salesforce credentials', SALESFORCE_PATH_ADMIN);
+      drupal_set_message(t('Unable to connect to Salesforce. !link', array('!link' => check_url($link))), 'error');
+      return;
+    }
+    $objects = $sf->describeSObjects(array_values($types));
+  }
+  catch (Exception $e) {
+    drupal_set_message(t("There was an error trying to connect to Salesforce.  Check your login credentials and/or the services this account is able to use (Enterprise, Unlimited, etc). Contact Salesforce to find out why you cannot access this API."));
+    return;
+    //DrupalSalesforce::watchdog(SALESFORCE_LOG_SOME, 'Unable to establish Salesforce connection while issuing describeSObjects API call.', array(), WATCHDOG_ERROR);
+  }
+  if (empty($objects)) {
+    return array();
+  }
+
+  // This is the normalization part: If only one object was described, Salesforce
+  // returned an object instead of an array. ALWAYS return an array of objects.
+  if (is_object($objects)) {
+    $objects = array($objects);
+  }
+
+  // And make it an associative array for good measure.
+  $tmp = array();
+  foreach ($objects as $o) {
+    $tmp[$o->name] = $o;
+  }
+  $objects = $tmp;
+  return $objects;
+}
+
+/*
+ ** This function returns an array of the sales force field objects that are required for the object type
+ **
+ ** Required is defined as NOT nillable, createable, and NOT defaultedOnCreate
+ **
+ ** Assumption: There are no fields that are required and ONLY updateble (i.e. updateable but not createable)
+ **
+ ** NOTE: The reason for sending the whole field object back, instead of just the name/value key pair, as the
+ **       function above does(salesforcewebform_fields_salesforcewebform_fields) is to allow a future update to automatically
+ **       create the webform field components. Sending the whole filed object back will allow a check on field->type to
+ **       allow the form component type to be determined for auto-creating webform field components
+ */
+/**
+ * @todo Please document this function.
+ * @see http://drupal.org/node/1354
+ */
+function salesforcewebform_fields_salesforcewebform_required_fields($form_sf_object_typecode) {
+  switch ($form_sf_object_typecode) {
+    case "l":
+      $types = array('Lead');
+      break;
+    case "c":
+      $types = array('Contact');
+      break;
+    case "p":
+      $types = array('Account');
+      break;
+    case "a":
+      $types = array('Account');
+      break;
+    case "m":
+      $types = array('Contact', 'Account');
+      break;
+  }
+
+  $fields = array();
+  $real_fields = salesforcewebform_fields_salesforce_api_describeSObjects(array('Lead', 'Contact', 'Account'));
+  if ($real_fields) {
+    foreach ($real_fields as $objtype) {
+      if (in_array($objtype->name, $types)) {
+        foreach ($objtype->fields as $key => $field) {
+          if ($field->name && $field->label && !$field->nillable && $field->createable & !$field->defaultedOnCreate) {
+            $fields[$key] = $field;
+          }
+        }
+      }
+    }
+  }
+  return $fields;
+}

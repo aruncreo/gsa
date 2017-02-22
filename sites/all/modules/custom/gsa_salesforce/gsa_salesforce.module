@@ -1,0 +1,1057 @@
+<?php
+
+include_once('gsa_salesforce.features.inc');
+
+
+/**
+* Implements hook_init().
+*/
+function gsa_salesforce_init() {
+	drupal_add_js(drupal_get_path('module', 'gsa_salesforce') . '/gsa_salesforce.js', array('scope' => 'footer'));
+}
+/**
+ * Implements hook_menu().
+ */
+function gsa_salesforce_menu() {
+  $items = array();
+  $items['admin/config/gsa_salesforce'] = array(
+    'title' => t('GSA Salesforce'),
+    'description' => 'Configure the GSA integration with Salesforce',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('gsa_salesforce_admin_settings'),
+    'access arguments' => array('administer gsa salesforce'),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'gsa_salesforce.admin.inc',
+  );
+  
+ $items['admin/config/people/agency_email_domain'] = array(
+    'title' => t('Agency/email domain validation settings'),
+    'description' => 'Configure email domain of salesforce agencies',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('gsa_salesforce_admin_settings_email_domain'),
+    'access arguments' => array('administer valid agency email domains'),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'gsa_salesforce.admin.inc',
+  );
+   $items['check_valid_email_domain/%/%'] = array(
+    'title' => t('Agency Email Domain Mapping'),
+    'description' => 'Configure email domain of salesforce agencies',
+    'page callback' => 'gsa_salesforce_email_domain_validation_check_ajax',
+    'page arguments' => array(1,2),
+    'access callback' => true,
+    'type' => MENU_NORMAL_ITEM,
+  );
+  
+  $items['admin/config/gsa_salesforce/settings'] = array(
+    'title' => t('General settings'),
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+  );
+
+  $items['admin/config/gsa_salesforce/group-mappings'] = array(
+    'title' => t('Group mappings'),
+    'description' => 'Map Interact groups to SFDC value options',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('gsa_salesforce_group_mapping_admin_settings_form'),
+    'access arguments' => array('administer gsa salesforce'),
+    'type' => MENU_LOCAL_TASK,
+    'file' => 'gsa_salesforce.admin.inc',
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_permission().
+ */
+function gsa_salesforce_permission() {
+  $permissions = array();
+  $permissions['administer gsa salesforce'] = array(
+    'title' => t('Administer GSA Salesforce'),
+  );
+  $permissions['administer valid agency email domains'] = array(
+    'title' => t('Administer valid agency email domains'),
+  );
+  return $permissions;
+}
+
+/**
+ * Implements hook_user_update().
+ */
+function gsa_salesforce_user_update(&$edit, $account, $category) {
+
+  // Stop if the user has never logged in.
+  if ($account->login == 0) return;
+
+  // See if email changes before syncing
+  watchdog('gsa_salesforce', 'gsa_salesforce_user_update called for user %username', array('%username' => $account->uid));
+  if (isset($edit['mail']) && $edit['mail'] && ($edit['mail'] != $account->mail)) {
+    gsa_salesforce_user_change_email($account, $edit['mail']);
+    $account->mail = $edit['mail'];
+  }
+  // Proceed with normal insert operation
+  gsa_salesforce_create_sf_user($account);
+}
+
+/**
+ * Create a new SF user
+ */
+function gsa_salesforce_create_sf_user($account) {
+  // Prepare Salesforce data from profile fields
+  watchdog('gsa_salesforce', 'create_sf_user called for user %username', array('%username' => $account->uid));
+  $data = gsa_salesforce_map_profile($account, TRUE);
+  // Add to or update in Salesforce
+  if ($data) {
+    gsa_salesforce_user_sync($data, $account);
+  }
+}
+
+/**
+ * Implements hook_user_delete().
+ */
+function gsa_salesforce_user_delete($account) {
+  // Remove the Salesforce object ID
+  gsa_salesforce_user_sfid_delete($account);
+}
+
+/**
+ * Implements hook_mail().
+ */
+function gsa_salesforce_mail($key, &$message, $params) {
+  switch ($key) {
+    case 'error':  
+      $message['subject'] = t('A Salesforce error has occurred');
+      $message['body'] = array($params['error_message']);
+      break;
+  }
+}
+
+/**
+ * Implements hook_form_alter() 
+ */
+function gsa_salesforce_form_alter(&$form, &$form_state, $form_id) {
+  // Alter the user profile form
+  if ($form_id == 'user_profile_form' || $form_id == 'user_register' || $form_id == 'user_register_form') {
+    $agency = gsa_salesforce_get_picklist('Agency__c', 'Account');
+    $category = gsa_salesforce_get_picklist('Job_Category__c', 'Lead');
+    $procurement_role = gsa_salesforce_get_picklist('Procurement_Role__c', 'Contact');
+    
+    $org_category = t('Work information');
+    if (isset($form[$org_category]['profile_agency']) && is_array($agency)) {
+      $form[$org_category]['profile_agency']['#options'] = $agency;
+    }
+    if (isset($form[$org_category]['profile_job_category']) && is_array($category)) {
+      $form[$org_category]['profile_job_category']['#options'] = $category;
+    }
+    if (isset($form[$org_category]['profile_procurement_role']) && is_array($category)) {
+      $form[$org_category]['profile_procurement_role']['#options'] = $procurement_role;
+    }
+    
+    module_load_include('inc', 'gsa_salesforce', 'includes/gsa_salesforce.locations');
+    $personal_category = t('Personal information');
+    if (isset($form[$personal_category]['profile_location'])) {
+      $form[$personal_category]['profile_location']['#options'] = gsa_salesforce_locations_options();
+    }
+    
+    //Adding a div as a suffix to Profile Agency field to show validation message
+    $form['Work information']['profile_agency']['#suffix']='<div id="email-domain-validation-msg"> </div>';
+  }
+  
+  if ($form_id == 'user_register' || $form_id == 'user_register_form') {
+  	// Adding email domain validation handler to user registration form
+    $form['#validate'][] = 'gsa_salesforce_register_email_domain_validation';
+  }
+  if($form_id == 'user_profile_form'){
+		// Adding email domain validation handler to user profile form
+    $form['#validate'][] = 'gsa_salesforce_profile_email_domain_validation';
+	}
+  
+}
+
+/*
+* Email domain validation handler for user registration form.
+*/
+function gsa_salesforce_register_email_domain_validation($form, $form_state) {
+	$mail = strrev($form_state['input']['mail']);
+	$mail_parts = explode('.',$mail);
+	$mail_domain_ext = $mail_parts[0];
+	$mail_domain_ext = strrev($mail_domain_ext);
+	$agency = $form_state['input']['profile_agency'];
+	$agency_var_key = preg_replace('/[^a-zA-Z0-9]/', '_', $agency);
+	$validation_html = gsa_salesforce_email_domain_validation_check($agency_var_key,$mail_domain_ext);
+	if($validation_html != FALSE){
+		form_set_error('profile_agency', t($validation_html));
+	}	
+}
+
+/*
+* Email domain validation handler for user profile form.
+*/
+function gsa_salesforce_profile_email_domain_validation($form, $form_state) {
+	$mail = strrev($form_state['build_info']['args'][0]->mail);
+	$mail_parts = explode('.',$mail);
+	$mail_domain_ext = $mail_parts[0];
+	$mail_domain_ext = strrev($mail_domain_ext);
+	$agency = $form_state['input']['profile_agency'];
+	$agency_var_key = preg_replace('/[^a-zA-Z0-9]/', '_', $agency);
+	$validation_html = gsa_salesforce_email_domain_validation_check($agency_var_key,$mail_domain_ext);
+	if($validation_html != FALSE){
+		form_set_error('profile_agency', t($validation_html));
+	}	
+}
+
+/**
+* Function to validate users email domain with agency selected.
+*/
+function gsa_salesforce_email_domain_validation_check($agency, $mail_domain_ext=''){
+	$validation_html = gsa_salesforce_generate_validation_html($agency, $mail_domain_ext);
+	return $validation_html;
+}
+
+/**
+* Function to validate users email domain with agency selected.
+*/
+function gsa_salesforce_email_domain_validation_check_ajax($agency, $mail_domain_ext=''){
+
+	$validation_html = gsa_salesforce_generate_validation_html($agency, $mail_domain_ext);
+	echo $validation_html;
+
+}
+
+function gsa_salesforce_generate_validation_html($agency, $mail_domain_ext=''){
+	$validation_html = FALSE;
+	$agency_domain_allowed =  array();
+	$domain_msg = '';
+	
+	//List of allowed domains
+	$allowed_domains = array('gov','mil','us','com','org','net','edu');
+	$domain_select = FALSE;
+	
+	//Returning TRUE if no checkbox is selected against an agency
+	foreach($allowed_domains as $domain){
+		if(variable_get('gsa_salesforce_agency_'.$agency.'_'.$domain,'')){
+			$agency_domain_allowed[] = '.'.$domain;
+			$domain_select = TRUE;
+		}
+	}
+	
+	for($i= count($agency_domain_allowed) ; $i>=1; $i--){
+		if(count($agency_domain_allowed) == 1){
+			$domain_msg = $agency_domain_allowed[$i-1];
+			break;
+		}
+		if($i == 1){
+			$domain_msg = $domain_msg.' or '.$agency_domain_allowed[$i-1];
+		}elseif(count($agency_domain_allowed) == $i){
+			$domain_msg = $domain_msg.$agency_domain_allowed[$i-1];
+		}else{
+			$domain_msg = $domain_msg.', '.$agency_domain_allowed[$i-1];
+		}
+		
+		
+	}
+
+	
+	if(!variable_get('gsa_salesforce_agency_'.$agency.'_'.$mail_domain_ext,'') && $domain_select != FALSE){
+		$validation_html = 'The email address you provided does not meet the requirements for the Agency you selected. Please check your email address for errors and to ensure it has '.$domain_msg.' domain. Otherwise, please make another Agency selection.';
+	}
+	
+	return $validation_html;
+}
+
+/**
+ * Implementation of hook_theme().
+ */
+
+ function gsa_salesforce_theme() {
+   return array(
+     'agency_email_domain_setting_form' => array(
+     	'render element' => 'form',
+       'template' => 'agency-email-domain-setting-form',
+       'arguments' => array('form' => NULL),
+     ),
+   );
+ }
+
+/**
+ * Implements hook_form_salesforce_api_settings_form_alter().
+ */
+function gsa_salesforce_form_salesforce_api_settings_form_alter(&$form, &$form_state) {
+  $status = (variable_get('gsa_salesforce_enabled', 0) == 1) ? t('enabled') : t('disabled');
+
+  // Show the connection enabled status on the Salesforce admin page.
+  $form['gsa_salesforce_enabled_status'] = array(
+    '#type' => 'item',
+    '#weight' => -100,
+    '#markup' => t(
+       '<strong>Connections to Salesforce are currently %status.</strong><br />Enable or disable connections on the <a href="@admin-page">GSA Salesforce admin page</a>.</p>',
+       array(
+         '%status' => $status,
+         '@admin-page' => url('admin/config/gsa_salesforce'),
+       )
+     ),
+  );
+}
+
+/**
+ * Implements hook_og_membership_insert().
+ */
+function gsa_salesforce_og_membership_insert(OgMembership $ogMembership) {
+  if ($ogMembership->entity_type == 'user') {
+    gsa_salesforce_flag_user_update($ogMembership->etid);
+  }
+}
+
+/**
+ * Implements hook_og_membership_delete().
+ */
+function gsa_salesforce_og_membership_delete(OgMembership $ogMembership) {
+  if ($ogMembership->entity_type == 'user') {
+    gsa_salesforce_flag_user_update($ogMembership->etid);
+  }
+}
+
+/**
+ * Flag a user as requiring an SFDC update.
+ */
+function gsa_salesforce_flag_user_update($uid) {
+  $query = db_update('gsa_salesforce_user_sfid')
+  ->fields(array('updateflag' => 1))
+  ->condition('uid', $uid, '=')
+  ->execute();
+}
+ 
+/**
+ * Implements hook_cron().
+ */
+function gsa_salesforce_cron() {
+  // Perform all queued SFDC updates
+  $query = db_select('gsa_salesforce_user_sfid', 'gsasfid')
+  ->fields('gsasfid')
+  ->condition('updateflag', 1, '=');
+  $result = $query->execute();
+  while ($row = $result->fetchAssoc()) {
+    $edit = array();
+    $category = '';
+    $account = user_load($row['uid']);
+    gsa_salesforce_user_update($edit, $account, $category);
+  }
+}
+
+/**
+ * Change email address of a user in Salesforce
+ *
+ * @param $account
+ *   A user object
+ * @param $new_email
+ *   The user's new email address
+ * @return
+ *   The user's Salesforce ID if successful, FALSE if not
+ */
+function gsa_salesforce_user_change_email($account, $new_email) {
+  $op = t('Email address update');
+  
+  // Fetch the user's Salesforce data
+  $sfUser = gsa_salesforce_user_sfid_get($account);
+  
+  // Make sure we've inserted this user into Salesforce already
+  if (!$sfUser) {
+    // Insert into Salesforce with old email so we update their
+    // existing record, if any, instead of creating a new one
+    $sfUser = gsa_salesforce_user_sync(gsa_salesforce_map_profile($account), $account);
+  }
+  
+  // Build Salesforce object
+  $sfObject = new stdClass;
+  $sfObject->Id = $sfUser['sfid'];
+  $sfObject->Email = $new_email;
+  
+  // Connect to Salesforce
+  if (!($sf = gsa_salesforce_connect($op, $sfObject))) {
+    return FALSE;
+  }
+  
+  try {
+    // Update the email in Salesforce
+    $sfResponse = $sf->client->update(array($sfObject), $sfUser['type']);
+  }
+  catch (Exception $e) {
+    gsa_salesforce_log_exception($e, $op, $sfObject);
+    return FALSE;
+  }
+  
+  // Check response from Salesforce
+  if ($status = gsa_salesforce_check_response($sfResponse, $op, $sfObject)) {
+    gsa_salesforce_user_sfid_save($account, $sfUser['type'], $sfResponse->id);
+  }
+  
+  return $status ? $sfResponse : FALSE;
+}
+
+/**
+ * Register a new user with Salesforce
+ *
+ * We use the email address as the acting primary key between
+ * Drupal and Salesforce.
+ *
+ * Actions:
+ *   1) Check if the user is an existing Contact. If so, update.
+ *   2) Check if the user is an existing Lead. If so, update
+ *   3) If neither, create a lead.
+ *
+ * @param $data
+ *   An associative array of data, keyed by the Salesforce field identifier
+ * @param $account
+ *   The user account object
+ * @param $newData
+ *   An associative array of data to be applied only to new leads, keyed by the
+ *   Salesforce field identifier
+ * @return
+ *   The user's Salesforce data if successful, if not, FALSE.
+ *   Data is returned in an associative array containing keys type
+ *   and sfid.
+ */
+function gsa_salesforce_user_sync($data, $account = NULL, $newData = array()) {
+
+  watchdog('gsa_salesforce', 'gsa_salesforce_user_sync called for user %username', array('%username' => $account->uid));
+
+  $op = t('User sync');
+  
+  // Build new data object
+  $sfObject = new stdClass;
+  
+  if ($account) {
+    // If an account is provided, use object email
+    $sfObject->Email = $account->mail;
+    // Remove email from $data, if it exists
+    unset($data['Email']);
+    // Add a URL to their profile
+    $sfObject->Interact_Profile__c = url("user/{$account->uid}", array('absolute' => TRUE));
+    // Add the list of group memberships
+    $sfObject->Interact_Group_Affiliation__c = _gsa_salesforce_get_user_groups_value($account);
+  }
+  
+  // Complete the object with provided data
+  foreach ($data as $key => $value) {
+    $sfObject->$key = $value;
+  }
+  
+  // Connect to Salesforce
+  if (!($sf = gsa_salesforce_connect($op, $sfObject))) {
+    return FALSE;
+  }
+  
+  try {
+    // Lookup for existing contact, then lead, then create lead if needed
+    foreach (array('Contact', 'Lead') as $sfType) {
+      // Specify the region field
+      $region_field = ($sfType == 'Lead') ? 'Region__c' : 'Contact_region__c';
+      // Gather the fields to select
+      $fields = array();
+      $fields[] = 'Id';
+      $fields[] = $region_field;
+      if ($sfType == 'Lead') {
+        $fields[] = 'ConvertedContactId';
+        $fields[] = 'IsConverted';
+      }
+      // Execute the query lookup
+      $sfResult = $sf->client->query("SELECT " . implode(', ', $fields) . " FROM {$sfType} WHERE Email = '" . str_replace("'", "\'", $sfObject->Email) . "'");
+      // Record already exists
+      if ($sfResult->records) {
+        // Attach the values we fetched
+        foreach ($fields as $field) {
+          $sfObject->$field = $sfResult->records[0]->$field;
+        }
+        break;
+      }
+    }
+    
+    // Set the region field, if not yet
+    $sfObject->$region_field = isset($sfObject->$region_field) ? $sfObject->$region_field : NULL;
+    // Make alterations to the object based on type
+    gsa_salesforce_object_alter($sfObject, $sfType, $newData);
+    // Run the operation
+    $operation = isset($sfObject->Id) ? 'update' : 'create';
+    watchdog('gsa_salesforce', 'Creating the user in salesforce %username', array('%username' => $account->uid));
+    
+    $sfResponse = $sf->client->$operation(array($sfObject), $sfType);
+  }
+  catch (Exception $e) {
+    gsa_salesforce_log_exception($e, $op, $sfObject);
+    return FALSE;
+  }
+  
+  // Convert the response, if needed
+  if (is_array($sfResponse)) {
+    if (count($sfResponse) == 1) {
+      $sfResponse = $sfResponse[0];
+    }
+  }
+
+  // Check response from Salesforce
+  if ($status = gsa_salesforce_check_response($sfResponse, $op, $sfObject)) {
+    if ($account) {
+      gsa_salesforce_user_sfid_save($account, $sfType, $sfResponse->id);
+    }
+  }
+  
+  return $status ? array('type' => $sfType, 'sfid' => $sfResponse->id) : FALSE;
+}
+
+/**
+ * Alter a Salesforce object depending on it's type before syncing it
+ *
+ * @param &$sfObject
+ *   The Salesforce object to modify
+ * @param &$type
+ *   The type of object it is
+ * @param $newData
+ *   If $new, optionally supply the additional fields for a new object
+ */
+function gsa_salesforce_object_alter(&$sfObject, &$type, $newData = array()) {
+  // Remove the deprecated Agency__c field from either object type.
+  unset($sfObject->Agency__c);
+
+  // State/Region handling
+  // Determine the field to use
+  $key = ($type == 'Lead') ? 'Region__c' : 'Contact_region__c';
+  // See if we've fetched it from SF
+  if ($sfObject->$key === NULL) {
+    // Only sync this if it was previously empty and if we have a state
+    if (isset($sfObject->State) && $sfObject->State) {
+      // Add the region code
+      module_load_include('inc', 'gsa_salesforce', 'includes/gsa_salesforce.locations');
+      if ($region = gsa_salesforce_get_region($sfObject->State)) {
+        $sfObject->$key = $region;
+      }
+    }
+    else {
+      // Don't sync location and region
+      unset($sfObject->$key);
+      unset($sfObject->State);
+    }
+  }
+  else {
+    // Don't sync location and region
+    unset($sfObject->$key);
+    unset($sfObject->State);
+  }  
+  
+  // Convert a Lead's ConvertedContactId, if we have one
+  if ($type == 'Lead') {
+    if (isset($sfObject->ConvertedContactId) && $sfObject->ConvertedContactId) {
+      if (isset($sfObject->IsConverted) && $sfObject->IsConverted) {
+        $sfObject->Id = $sfObject->ConvertedContactId;
+        $type = 'Contact';
+        unset($sfObject->ConvertedContactId);
+        unset($sfObject->IsConverted);
+      }
+    }
+  }
+
+  // Alter a Lead object
+  if ($type == 'Lead') {
+    // If this is a new object
+    if (!isset($sfObject->Id)) {
+      if (empty($newData)) {
+        // Load defaults for a new lead
+        $sfObject->LeadSource = 'Interact';
+        $sfObject->Status = 'New';
+        $sfObject->Rating = 'Hot';
+        if ($ownerId = variable_get('gsa_salesforce_ownerid', '')) {
+          $sfObject->OwnerId = $ownerId;
+        }
+      }
+      else {
+        // Load provided data for a new lead
+        foreach ($newData as $key => $value) {
+          $sfObject->$key = $value;
+        }
+      }
+    }
+    
+    // Iterate over the available fields to alter them
+    foreach ($sfObject as $key => $value) {
+      switch ($key) {
+        case 'HasOptedOutOfEmail':
+          $sfObject->$key = $value ? '1' : '0';
+          break;
+      }
+    }
+  }
+  // Alter a Contact object
+  else if ($type == 'Contact') {
+    // Iterate over the available fields to alter them
+    foreach ($sfObject as $key => $value) {
+      switch ($key) {
+        case 'Company':
+          unset($sfObject->$key);
+          break;
+        case 'Job_Category__c':
+          unset($sfObject->$key);
+          $sfObject->Contact_Job_Category__c = $value;
+          break;
+        case 'HasOptedOutOfEmail':
+          $sfObject->$key = $value ? '1' : '0';
+          break;
+        case 'Country':
+        case 'Street':
+        case 'PostalCode':
+        case 'City':
+        case 'State':
+          unset($sfObject->$key);
+          $newkey = "Mailing{$key}";
+          $sfObject->$newkey = $value;
+          break;
+      }
+    }
+  }
+  
+  // Remove more fields that we no longer need
+  unset($sfObject->ConvertedContactId);
+  unset($sfObject->IsConverted);
+}
+
+/**
+ * Handle error messages from Salesforce
+ *
+ * @param $response
+ *   A response object or array of response objects from Salesforce.
+ * @param $op
+ *   The operation being performed
+ * @param $data
+ *   The data being sent to Salesforce
+ * @return
+ *   TRUE if the response was successful, otherwise FALSE
+ */
+function gsa_salesforce_check_response($response, $op = NULL, $data = NULL) {
+  $success = TRUE;
+  if (!is_array($response)) {
+    $responses = array($response);
+  } 
+  else {
+    $responses = $response;
+  }
+  
+  foreach ($responses as $responseObject) {
+    if (!$responseObject->success) {
+      $output = gsa_salesforce_prepare_error($responseObject, $op, $data);
+      if (user_access('administer gsa salesforce') || user_access('administer salesforce')) {
+        drupal_set_message(t('An error occurred while trying to communicate with Salesforce.'), 'error');
+        drupal_set_message($output, 'error');
+      }
+      watchdog('gsa_salesforce', t('An error occurred while trying to communicate with Salesforce.') . "<br/><pre>$output</pre>", array('response' => $output), WATCHDOG_CRITICAL);
+      // Send out an email alert, if desired
+      _gsa_salesforce_mail_error($output);
+      $success = FALSE;
+    }
+  }
+  return $success;
+}
+
+/**
+ * Log exeception message
+ *
+ * @param $e
+ *   An Exception object
+ * @param $op
+ *   The operation that caused the exception
+ * @param $data
+ *   The data being sent to Salesforce
+ */
+function gsa_salesforce_log_exception($e, $op = NULL, $data = NULL) {
+  $message = gsa_salesforce_prepare_error($e->getMessage(), $op, $data);
+  if (user_access('administer gsa salesforce') || user_access('administer salesforce')) {
+    drupal_set_message(t('An error occurred while trying to communicate with Salesforce.'), 'error');
+    drupal_set_message($message, 'error');
+  }
+  watchdog('gsa_salesforce', 'Salesforce API threw an exception: !msg', array('!msg' => "<br/><pre>{$message}</pre>"), WATCHDOG_CRITICAL);
+  // Send out an email alert, if desired
+  _gsa_salesforce_mail_error($message);
+}
+
+/**
+ * Prepare a debug message
+ *
+ * @param $message
+ *   The error message or response
+ * @param $op
+ *   The operation that caused the error
+ * @param $data
+ *   Data being passed to Salesforce
+ * @return
+ *   The formatted error message
+ */
+function gsa_salesforce_prepare_error($message, $op = NULL, $data = NULL) {
+  global $user;
+  $lines = array();
+  $lines[] = t('User: !user', array('!user' => (($user->uid) ? "$user->name [uid: $user->uid]" : t('Anonymous'))));
+  $lines[] = t('Operation: !op', array('!op' => ($op ? $op : t('Not specified'))));
+  $lines[] = t('Message: !msg', array('!msg' => print_r($message, 1)));
+  $lines[] = t('Data: !data', array('!data' => print_r($data, 1)));
+  return implode("\n", $lines);
+}
+
+/**
+ * Map user profile fields to a Salesforce Object
+ *
+ * @param $user
+ *   A Drupal user object
+ * @param $insert
+ *   TRUE if the user is being created during this call. This is needed
+ *   to properly load the profile fields.
+ * @return
+ *   An associative array filled with required profile fields, keyed by
+ *   Salesforce field names
+ */
+function gsa_salesforce_map_profile($user, $insert = FALSE) {
+  $data = array();
+  
+  // Fully load the user, to get the profile
+  if (!$insert) {
+    $account = user_load($user->uid);
+  }
+  else {
+    $account = $user;
+  }
+  
+  // Required fields
+  $map = gsa_salesforce_get_profile_map();
+    
+  // Map available profile fields to Salesforce fields
+  foreach ($account as $field => $value) {
+    foreach ($map as $sf_key => $profile) {
+      if ($field == $profile['field']) {
+        $data[$sf_key] = $value;
+      }
+    }
+  }
+
+  // Make sure we have all of the fields in the map
+  
+  // Disabled due to addition of required profile fields in Interact
+  // which are therfore empty for a large number of users, which prevents
+  // sync operations from happening for those users. 
+/*  
+  foreach ($map as $key => $value) {
+    if (!isset($data[$key]) && $value['required']) {
+      return FALSE;
+    }
+  }
+*/
+
+  return $data;
+}
+
+/**
+ * Return an array keyed with Salesforce fields which point to
+ * user profile fields
+ */
+function gsa_salesforce_get_profile_map() {
+  return array(
+    'FirstName' => array(
+      'field' => variable_get('gsa_salesforce_profile_first_name', ''),
+      'required' => TRUE,
+    ),
+    'LastName' => array(
+      'field' => variable_get('gsa_salesforce_profile_last_name', ''),
+      'required' => TRUE,
+    ),
+    'State' => array(
+      'field' => variable_get('gsa_salesforce_profile_location', ''),
+      'required' => FALSE,
+    ),
+    'Company' => array(
+      'field' => variable_get('gsa_salesforce_profile_company', ''),
+      'required' => TRUE,
+    ),
+    'Title' => array(
+      'field' => variable_get('gsa_salesforce_profile_job_title', ''),
+      'required' => TRUE,
+    ),
+    'Agency__c' => array(
+      'field' => variable_get('gsa_salesforce_profile_agency', ''),
+      'required' => TRUE,
+    ),
+    'Job_Category__c' => array(
+      'field' => variable_get('gsa_salesforce_profile_job_category', ''),
+      'required' => TRUE,
+    ),
+    'Procurement_Role__c' => array(
+      'field' => variable_get('gsa_salesforce_profile_procurement_role', ''),
+      'required' => TRUE,
+    ),
+    'HasOptedOutOfEmail' => array(
+      'field' => variable_get('gsa_salesforce_profile_email_optout', ''),
+      'required' => FALSE,
+    ),
+  );
+}
+
+/**
+ * Save the user's Salesforce object ID
+ *
+ * @param $user
+ *   A user object
+ * @param $type
+ *   The type of Salesforce object.
+ * @param $sfid
+ *   The Salesforce ID
+ */
+function gsa_salesforce_user_sfid_save($user, $type, $sfid) {
+  // Only proceed if user is logged in
+  if (!$user->uid) {
+    return FALSE;
+  }
+  
+  // First delete any existing record
+  gsa_salesforce_user_sfid_delete($user);
+  
+  // Insert the data
+  db_insert('gsa_salesforce_user_sfid')
+    ->fields(array(
+      'uid' => $user->uid,
+      'type' => $type,
+      'sfid' => $sfid,
+      'updateflag' => 0,
+    ))
+    ->execute();
+}
+
+/**
+ * Retrieve the user's Salesforce object ID
+ *
+ * @param $user
+ *   A user object
+ * @param $resync
+ *   Internal user only
+ * @return
+ *   An associative array with the keys 'type' and 'sfid', or FALSE
+ *   if none found
+ */
+function gsa_salesforce_user_sfid_get($user, $resync = FALSE) {
+  static $sfids = array();
+  
+  // Check to see if this user hasn't been cached yet
+  if (!isset($sfids[$user->uid])) {
+    // Look up the SFID data for the user
+    $result = db_select('gsa_salesforce_user_sfid', 'g')
+      ->fields('g')
+      ->condition('g.uid', $user->uid)
+      ->execute()
+      ->fetchObject();
+
+    // If we have a match, validate it against SF
+    $validated = FALSE;
+    if ($result) {
+      // Connect to Salesforce
+      $op = t('Get user SFID: validate');
+      if (!($sf = gsa_salesforce_connect($op))) {
+        return FALSE;
+      }
+      
+      try {
+        $sfResult = $sf->client->query("SELECT Id FROM {$result->type} WHERE Id = '{$result->sfid}'");
+        if (isset($sfResult->records) && !empty($sfResult->records)) {
+          $validated = TRUE;
+        }
+      }
+      catch (Exception $e) {
+        gsa_salesforce_log_exception($e, $op, $debug);
+        return FALSE;
+      }
+    }
+    
+    // Check if this SFID has been validated
+    if (!$validated) {
+      // If this is a failed resync, then something went wrong
+      if ($resync) {
+        $sfids[$user->uid] = FALSE;
+      }
+      else {
+        // Call to resync this user with SF, getting them a new SFID
+        $edit = array();
+        gsa_salesforce_create_sf_user($edit, $user);
+        // Now, a valid SFID should be registered, so start again
+        return gsa_salesforce_user_sfid_get($user, TRUE);
+      }
+    }
+    else {
+      // SFID is good, so cache it
+      $sfids[$user->uid] = array('type' => $result->type, 'sfid' => $result->sfid);
+    }
+  }
+  
+  return $sfids[$user->uid];
+}
+  
+/**
+ * Delete the user's Salesforce object ID
+ *
+ * @param $user
+ *   A user object
+ */
+function gsa_salesforce_user_sfid_delete($user) {
+  db_delete('gsa_salesforce_user_sfid')
+    ->condition('uid', $user->uid)
+    ->execute();
+}
+
+/**
+ * Connect to Salesforce
+ *
+ * @param $op
+ *   The intended operation which required a connection
+ * @param $data
+ *   The intended data to be sent to Salesforce
+ * @return
+ *   If successfully connected, a Salesforce object, otherwise FALSE
+ */
+function gsa_salesforce_connect($op = NULL, $data = NULL) {
+  if (variable_get('gsa_salesforce_enabled', 0) == 1) {
+    $sf = salesforce_api_connect();
+    if (!$sf) {
+      if (user_access('administer gsa salesforce') || user_access('administer salesforce')) {
+        drupal_set_message(t('Could not connect to Salesforce. Please check your settings and credentials.'), 'error');
+      }
+      if ($op != 'test') {
+        $message = gsa_salesforce_prepare_error(t('Unable to connect to Salesforce'), $op, $data);
+        watchdog('gsa_salesforce', $message, array(), WATCHDOG_CRITICAL);
+        _gsa_salesforce_mail_error($message);
+      }
+      return FALSE;
+    }
+    return $sf;
+  } 
+  else {
+    if (user_access('administer gsa salesforce') || user_access('administer salesforce')) {
+      drupal_set_message(t('The Salesforce connection is not enabled.'), 'error');
+    }
+  }
+}
+
+/**
+ * Fetch available picklist values from a Salesforce picklist
+ *
+ * @param $name
+ *   The name of the picklist field
+ * @param $object
+ *   The name of the object it belongs to
+ * @param $reset
+ *   Boolean indicating whether to clear the cached value for the picklist.
+ *   Defaults to FALSE.
+ * @return
+ *   An assocative array of picklist values, keyed with the
+ *   machine name
+ */
+function gsa_salesforce_get_picklist($name, $object, $reset = FALSE) {
+  $list = '';
+  $op = t('Fetch picklist');
+  
+  // Cache the cache
+  $options = cache_get("salesforce_picklist:{$object}:{$name}");
+  if (!$reset && isset($options->data) && !empty($options->data)) {
+    // Just return the cached data
+    return $options->data;
+  }
+
+  $options = array();
+  
+  // Connect to Salesforce
+  if (!($sf = gsa_salesforce_connect($op))) {
+    return FALSE;
+  }
+  
+  // Fetch the object description
+  try {
+    $sfResult = $sf->client->describeSObject($object);
+  }
+  catch (Exception $e) {
+    gsa_salesforce_log_exception($e, $op);
+    return FALSE;
+  }
+  
+  // Find the field data in the object
+  if ($sfResult) {
+    foreach ($sfResult->fields as $field) {
+      if ($field->name == $name) {
+        $list = $field;
+      }
+    }
+  }
+
+  // Format field list values as options
+  if ($list) {
+    foreach ($list->picklistValues as $option) {
+      if (isset($option->value)) {
+        if (strstr($option->value, '-----')) {
+          continue;
+        }
+        $options[$option->value] = $option->label;
+      }
+    }
+  }
+  
+  // Store this in the cache
+  if (!empty($options)) {
+    cache_set("salesforce_picklist:{$object}:{$name}", $options, 'cache', CACHE_TEMPORARY);
+  }
+
+  return $options;
+}
+
+/**
+ * Send out an email alert
+ *
+ * @param $message
+ *   The body of the email
+ */
+function _gsa_salesforce_mail_error($message) {
+  if ($addresses = variable_get('gsa_salesforce_email_alert', '')) {
+    // Split addresses up by comma
+    $addresses = explode(',', $addresses);
+    
+    // Email each address
+    foreach ($addresses as $address) {
+      if (!($address = trim($address))) {
+        continue;
+      }
+      
+      drupal_mail(
+        'gsa_salesforce',
+        'error',
+        $address,
+        language_default(),
+        array(
+          'error_message' => $message,
+        )
+      );
+    }
+  }
+}
+
+/**
+ * Provide a list of user group memberships, formatted for SFDC
+ *
+ * @param $account
+ *   User account object
+ *
+ * @return
+ *   String list of group names (as represented in SFDC), delimited
+ *   with semicolons.
+ */
+function _gsa_salesforce_get_user_groups_value($account) {
+
+  // Stop if OG is not enabled.
+  if (!module_exists('og')) {
+    return '';
+  }
+
+  $gids = array_keys(og_get_entity_groups('user', $account));
+  $user_groups = array();
+  foreach ($gids as $gid) {
+    if ($sfdc_value = variable_get("gsa_salesforce_group_gid{$gid}_sfdc_value", FALSE)) {
+      $user_groups[] = $sfdc_value;
+    }
+  }
+  asort($user_groups);
+  return count($user_groups) ? implode(';', $user_groups) : '';
+}

@@ -1,0 +1,4 @@
+name = "GSA OG User"
+description = "Allow users to join groups during registration"
+core = 7.x
+dependencies[] = og

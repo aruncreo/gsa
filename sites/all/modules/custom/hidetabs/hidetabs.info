@@ -1,0 +1,3 @@
+name = Hide Vertical Tabs 
+description = Hide Verticle tabs which user does not have admin role.
+core = 7.x

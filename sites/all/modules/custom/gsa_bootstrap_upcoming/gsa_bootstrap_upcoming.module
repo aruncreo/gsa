@@ -1,0 +1,21 @@
+<?php 
+/**
+ * Alter Upcoming Live: In-Person view page with add a bootstrap class and placeholder
+ */
+function gsa_bootstrap_upcoming_form_alter(&$form, $form_state, $form_id) {
+
+  if($form['#id'] == "views-exposed-form-clone-of-gsa-customer-training-page-1"){
+ 
+    if (isset($form['field_gsa_city_value'])) {                        
+       $form['field_gsa_city_value']['#attributes'] = array('class' => array('form-control'), 'placeholder' => array('City'));
+    }
+    if (isset($form['title'])) {                        
+       $form['title']['#attributes'] = array('class' => array('form-control'), 'placeholder' => array('Event'));
+    }
+    if (isset($form['field_gsa_state_value'])) {                        
+       $form['field_gsa_state_value']['#attributes'] = array('class' => array('form-control'), 'placeholder' => array('State'));
+    }
+
+  }
+}
+

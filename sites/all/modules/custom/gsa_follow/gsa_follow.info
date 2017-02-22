@@ -1,0 +1,13 @@
+; $Id: gsa_follow.info 175 2012-08-23 13:23:24Z nikunjk $
+
+name = "GSA Follow"
+package = "GSA"
+
+dependencies[] = gsa_wall
+dependencies[] = heartbeat
+
+core = "7.x"
+description = "Module to add functionlity to like comments."
+
+files[] = gsa_follow.module
+

@@ -1,0 +1,4 @@
+name = Node Menutabs
+description = Allows privileged users to create MENU_LOCAL_TASK tabs for nodes.
+core = 7.x
+

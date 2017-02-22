@@ -1,0 +1,120 @@
+<?php
+
+/**
+ * Implements hook_menu().
+ */
+function og_migratemembers_menu() {
+  $items = array();
+
+  $items['admin/config/group/migrate-members'] = array(
+    'title' => t('Migrate memberships'),
+    'description' => t('Add user members of one group to another group.'),
+    'access arguments' => array('administer group'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('og_migratemembers_admin_form'),
+    'type' => MENU_LOCAL_TASK,
+  );
+  
+  return $items;
+}
+
+/**
+ * Admin page form builder.
+ */
+function og_migratemembers_admin_form() {
+  $form = array();
+  
+  $form['source_group'] = array(
+    '#title' => t('Copy memberships from'),
+    '#type' => 'select',
+    '#required' => TRUE,
+    '#options' => og_migratemembers_get_groups(),
+  );
+  
+  $form['destination_group'] = array(
+    '#title' => t('Copy memberships to'),
+    '#type' => 'select',
+    '#required' => TRUE,
+    '#options' => og_migratemembers_get_groups(),
+  );
+  
+  $form['submit'] = array(
+    '#title' => t('Copy group memberships'),
+    '#type' => 'submit',
+    '#value' => t('Copy group memberships'),
+  );
+  
+  return $form;
+}
+
+/**
+ * Admin form validation.
+ */
+function og_migratemembers_admin_form_validate($form, &$form_state) {
+  if ($form_state['values']['source_group'] == $form_state['values']['destination_group']) {
+    form_set_error('destination_group', t('Source and destination groups must be different.'));
+  }
+}
+
+/**
+ * Submit handler for admin form.
+ */
+function og_migratemembers_admin_form_submit($form, &$form_state) {
+  
+  // Create a batch array.
+  $batch = array(
+    'source_group_name' => og_load($form_state['values']['source_group'])->label,
+    'destination_group_name' => og_load($form_state['values']['destination_group'])->label,
+    'finished' => 'og_migratemembers_batch_finished',
+  );
+  
+  // Get the source group memberships.
+  $query = db_select('og_membership', 'ogm');
+  $query->fields('ogm', array('etid'));
+  $query->condition('entity_type', 'user');
+  $query->condition('gid', $form_state['values']['source_group']);
+  $query->condition('state', '1');
+  $result = $query->execute();
+
+  foreach ($result as $source_membership) {
+    $destination_membership = array(
+      $form_state['values']['destination_group'],
+      $source_membership->etid,
+    );
+    $batch['operations'][] = array('og_migratemembers_batch_op', $destination_membership);
+  }
+  
+  batch_set($batch);
+  batch_process();
+}
+
+/**
+ * Batch operation.
+ */
+function og_migratemembers_batch_op($gid, $etid) {
+  $account = user_load($etid);
+  og_group($gid, array('entity' => $account));
+}
+
+/**
+ * Finished callback for batch.
+ */
+function og_migratemembers_batch_finished($success, $results, $operations) {
+  if ($success) {
+    drupal_set_message(t('Created %n new group memberships.', array('%n' => count($results))));
+  }
+}
+
+/**
+ * Helper function to get group list.
+ */
+function og_migratemembers_get_groups() {
+  // Fetch groups.
+  $gids = og_get_group_ids();
+  $groups = og_load_multiple($gids);
+  foreach ($groups as $gid => $group) {
+    $groups[$gid] = $group->label;
+  }
+  asort($groups);
+  return $groups;
+}

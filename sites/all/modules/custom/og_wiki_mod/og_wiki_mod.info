@@ -1,0 +1,6 @@
+name = OG Wiki moderation
+description = Allow group admins to moderate Wiki revisions within their groups
+core = 7.x
+dependencies[] = node
+dependencies[] = og
+dependencies[] = og_features

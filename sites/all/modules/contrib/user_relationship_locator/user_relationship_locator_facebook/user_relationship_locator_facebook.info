@@ -1,0 +1,13 @@
+name = User Relationship Locator Facebook 
+description = "Provides Facebook friends also on the current site for the current user." 
+dependencies[] = user_relationship_locator 
+dependencies[] = fboauth
+package = User Relationships
+core = 7.x
+
+; Information added by drupal.org packaging script on 2012-05-07
+version = "7.x-1.0-alpha4"
+core = "7.x"
+project = "user_relationship_locator"
+datestamp = "1336409787"
+

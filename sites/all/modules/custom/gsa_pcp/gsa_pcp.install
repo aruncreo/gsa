@@ -1,0 +1,27 @@
+<?php
+
+/**
+ * Implementation of hook_install().
+ */
+function gsa_pcp_install() {
+
+}
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function gsa_pcp_uninstall() {
+    variable_del('gsa_pcp_profile_fields');
+    variable_get('gsa_pcp_hide_completed');
+}
+
+/**
+ * Update function to correct variable name.
+ */
+function gsa_pcp_update_7001() {
+  if ($fields = variable_get('pcp-profile-fields', FALSE)) {
+    variable_del('pcp-profile-fields');
+    variable_set('gsa_pcp_profile_fields', $fields);
+  }
+  return array();
+}

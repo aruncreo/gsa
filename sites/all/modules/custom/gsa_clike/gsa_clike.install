@@ -1,0 +1,75 @@
+<?php
+
+/**
+ * @file
+ * gsa_clike module install/schema/update hooks.
+ */
+
+/**
+ * Implements hook_install().
+ */
+function gsa_clike_install() {
+  
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function gsa_clike_uninstall() {
+  variable_del('clike_notify_like');
+  variable_del('clike_notify_unlike');
+}
+
+/**
+ * Remove the deprecated variable clike_send_mail.
+ */
+function gsa_clike_update_7001() {
+  variable_set('clike_notify_like', variable_get('clike_send_mail', 0));
+  variable_set('clike_notify_unlike', variable_get('clike_send_mail', 0));
+  variable_del('clike_send_mail');
+  return array();
+}
+
+/**
+ * Implements hook_schema().
+ */
+function gsa_clike_schema() {
+  $schema = array();
+
+  $schema['gsa_clike'] = array(
+    'description' => 'All comments liked in the system.',
+    'fields' => array(
+      'lcid' => array(
+        'description' => 'The unique ID for this particular gsa_clike.',
+        'type' => 'serial',
+        'size' => 'small',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'cid' => array(
+        'description' => 'Comment ID.',
+        'type' => 'varchar',
+        'length' => '32',
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'uid' => array(
+        'description' => 'User ID',
+        'type' => 'varchar',
+        'length' => '32',
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'created' => array(
+          'description' => 'The Unix timestamp when the comment was liked.',
+          'type' => 'int',
+          'not null' => TRUE,
+          'default' => 0,
+      ),
+    ),
+    'primary key' => array('lcid'),
+  );
+
+  return $schema;
+}
+

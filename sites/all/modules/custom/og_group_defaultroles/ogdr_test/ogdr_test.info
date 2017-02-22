@@ -1,0 +1,4 @@
+name = OG Default Roles Test
+description = Test functions for OG Default Roles
+core = 7.x
+php = 5.3

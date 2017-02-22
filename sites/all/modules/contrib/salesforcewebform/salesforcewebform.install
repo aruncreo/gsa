@@ -1,0 +1,62 @@
+<?php
+/**
+ * @file
+ * Install, update and uninstall functions for the salesforcewebform module.
+ *
+ */
+
+
+/**
+ * Implements hook_schema().
+ */
+function salesforcewebform_schema() {
+  $schema['salesforcewebform'] = array(
+    'description' => 'Salesforce Webform Module Table',
+    'fields' => array(
+      'nid' => array(
+        'description' => 'Node ID',
+        'type' => 'int',
+        'unsigned' => 1,
+        'not null' => TRUE,
+      ),
+      'active' => array(
+        'description' => 'Salesforce Webform enabled',
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'objecttype' => array(
+        'description' => 'Salesforce object type',
+        'type' => 'char',
+        'length' => '1',
+        'not null' => TRUE,
+        'default' => 'l',
+      ),
+    ),
+    'primary key' => array('nid'),
+  );
+
+  return $schema;
+}
+
+/**
+ * Remove variables on uninstall.
+ */
+function salesforcewebform_uninstall() {
+  // Remove variables.
+  variable_del("salesforcewebform_user");
+  variable_del("salesforcewebform_pw");
+  variable_del("salesforcewebform_custom_fields");
+  variable_del("salesforcewebform_toolkit_path");
+
+}
+
+/**
+ * Update vid to nid in the database when going to D7
+ */
+function salesforcewebform_update_7001() {
+  $ret = array();
+  $ret[] = db_drop_primary_key('salesforcewebform');
+  $ret[] = db_change_field('salesforcewebform', 'vid', 'nid', array('type' => 'int', 'unsigned' => 1, 'not null' => TRUE, 'description' => 'Node ID'), array('primary key' => array('nid')));
+}

@@ -1,0 +1,40 @@
+/* $Id: gsa_ask.theme.css 139 2012-08-21 19:51:14Z keyurp $ */
+#gsa-ask-form .form-submit {
+  float: left;
+  clear: both;
+}
+#gsa-ask-form .links {
+  float: left;
+  width: 100%;
+  padding: 10px 0;
+}
+#gsa-ask-form .view-my-faq{
+  float: left;
+  width: 86px;
+  border-right: 1px solid #ccc;
+  font-size: 12px;
+}
+
+#gsa-ask-form .view-all-faq {
+  float: left;
+  padding-left: 10px;
+  font-size: 12px;  
+}
+
+#views-exposed-form-faq-question-page-2 #edit-status-wrapper {
+  float: left;
+}
+
+#views-exposed-form-faq-question-page-2 #edit-status-wrapper label:FIRST-CHILD,
+#views-exposed-form-faq-question-page-2 #edit-status-wrapper .views-widget {
+  float: left;
+  padding: 2px 0 0 10px;
+}
+
+.view-faq-question .view-content th{
+  text-align: left;
+}
+.view-faq-question .view-content .views-field-title.active .active img{
+  margin: 5px;
+  border: 0;
+}

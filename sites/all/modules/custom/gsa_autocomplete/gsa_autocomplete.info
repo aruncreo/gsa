@@ -1,0 +1,4 @@
+name = "GSA Autocomplete"
+description = "Autocomplete feature modifications"
+core = 7.x
+dependencies[] = og

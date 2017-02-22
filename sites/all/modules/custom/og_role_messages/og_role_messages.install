@@ -1,0 +1,38 @@
+<?php
+
+/**
+ * Implementation of hook_schema().
+ */
+function og_role_messages_schema() {
+  $schema = array();
+  $schema['og_role_messages'] = array(
+    'description' => 'A table storing role-specific messages for Organic Groups.',
+    'fields' => array(
+      'gid' => array(
+        'type' => 'varchar', 
+        'length' => 255, 
+        'not null' => TRUE, 
+        'description' => 'The group ID.',
+      ),
+      'role' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'description' => 'Name of a role.',      
+      ),
+      'message' => array(
+        'type' => 'text',
+        'size' => 'big',
+        'not null' => FALSE,
+        'description' => 'Message text.',
+      ),
+    ),
+    'primary key' => array('gid', 'role'),
+    'indexes' => array(
+      'gid' => array('gid'),
+    ),
+  );
+
+  return $schema;
+}
+

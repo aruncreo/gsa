@@ -1,0 +1,694 @@
+<?php
+
+/**
+ * Implementation of hook_install()
+ */
+function gsa_config_install() {
+  // Override global context
+  /* gsa_config_override_global_context(); */
+  
+  // Disable global context
+  /* gsa_config_disable_global_context(); */
+  
+  // Disable all blocks
+  /* gsa_config_disable_all_blocks(); */
+  
+  // Configure the profile
+  /* gsa_config_set_profile_fields(); */
+  
+  // Override views
+  gsa_config_override_views();
+  
+  // Configure roles
+  /* gsa_config_roles(); */
+  
+  // Configure better formats
+  /* gsa_config_remove_better_formats(); */
+  
+  // Set the weight
+  gsa_config_set_weight();
+}
+
+/**
+ * Implementation of hook_uninstall()
+ */
+function gsa_config_uninstall() {
+  variable_del('gsa_special_message_domains');
+  variable_del('gsa_special_message');
+  variable_del('gsa_config_sitewide_rss_description');
+}
+
+/**
+ * Override views
+ */
+function gsa_config_override_views() {
+  // Fetch the available views
+  $views = variable_get('views_defaults', array());
+
+  // Mark 'tweets' to be disabled
+  $views['tweets'] = TRUE;
+
+  // Save the override
+  variable_set('views_defaults', $views);
+  views_invalidate_cache();
+  menu_rebuild();
+}
+
+/**
+ * Override the global context
+ */
+function gsa_config_override_global_context() {
+  $context = new stdClass;
+  $context->namespace = 'context_ui';
+  $context->attribute = 'global';
+  $context->value = 'global';
+  $context->data = serialize(array (
+    'system' => 0,
+    'description' => 'Show on every page',
+    'sitewide' => '1',
+    'block' =>
+    array (
+      'views_user_meta-block_1' => array (
+         'module' => 'views',
+         'delta' => 'user_meta-block_1',
+         'weight' => 47,
+         'region' => 'header',
+         'status' => '0',
+         'label' => 'User meta info',
+         'type' => 'context_ui',
+         'bid' => 'views_user_meta-block_1',
+      ),
+    ),
+  ));
+  
+  // Delete any existing
+  
+  db_delete('context')
+    ->condition('namespace', $context->namespace, '=')
+    ->condition('attribute', $context->attribute, '=')
+    ->condition('value', $context->value, '=')
+    ->execute();
+  
+  /* db_query("DELETE FROM {context} WHERE namespace = '%s' AND attribute = '%s' AND value = '%s'", $context->namespace, $context->attribute, $context->value); */
+  
+  // Save the override
+  drupal_write_record('context', $context);
+}
+
+/**
+ * Disable the global context provided by Commons
+ */
+function gsa_config_disable_global_context() {
+  $context->namespace = 'context_ui';
+  $context->attribute = 'global';
+  $context->value = 'global';
+  $status = variable_get('context_status', array());
+  $status["{$context->namespace}-{$context->attribute}-{$context->value}"] = ($form_state['values']['action'] == 'disable' ? CONTEXT_STATUS_DISABLED : CONTEXT_STATUS_ENABLED);
+  variable_set('context_status', $status);
+  context_invalidate_cache();
+}
+
+/**
+ * Disable all blocks
+ */
+function gsa_config_disable_all_blocks() {
+  db_update('blocks')
+    ->fields(array('status' => 0))
+    ->execute();
+    
+  /* db_query("UPDATE {blocks} SET status = 0"); */
+}
+
+/**
+ * Configure role changes
+ */
+function gsa_config_roles() {
+
+  
+}
+
+/**
+ * Configure the profile fields
+ */
+function gsa_config_set_profile_fields() {
+  // Set profile_organization to be required and on registration page
+  /* $fields['required'] = 1;
+  $fields['register'] = 1;
+  $fields['weight'] = 8;
+  
+  db_update('profile_field')
+    ->fields($fields)
+    ->condition('name', 'profile_organization', '=')
+    ->execute();
+  
+  // db_query("UPDATE {profile_fields} SET required = 1, register = 1, weight = -8 WHERE name = 'profile_organization'");
+
+  // Create an Agency field
+  $field = new stdClass;
+  $field->title = t('Agency');
+  $field->name = 'profile_agency';
+  $field->explanation = t('If you are a Federal, Military or State and Local employee please select your Agency and then enter your office name in the Office/Company field. If you are a Industry, Non-Profit or Association employee please select "Other - Industry, Non-Profit, Associations" from the Agency list.');
+  $field->category = 'Work information';
+  $field->type = 'selection';
+  $field->weight = -9;
+  $field->required = 1;
+  $field->register = 1;
+  $field->visibility = 2;
+  $field->autocomplete = 0;
+  $field->options = 'null';
+  drupal_write_record('profile_fields', $field);
+  
+  // Create a Job category field
+  $field = new stdClass;
+  $field->title = t('Job category');
+  $field->name = 'profile_job_category';
+  $field->explanation = t('Specify the category which best describes your job.');
+  $field->category = 'Work information';
+  $field->type = 'selection';
+  $field->weight = -7;
+  $field->required = 1;
+  $field->register = 1;
+  $field->visibility = 2;
+  $field->autocomplete = 0;
+  $field->options = 'null';
+  drupal_write_record('profile_field', $field); */
+}
+
+/**
+ * Remove 'Full HTML' as better format defaults
+ */
+function gsa_config_remove_better_formats() {
+  /* db_delete('better_formats_defaults')
+    ->condition('format', 2, '=')
+    ->execute(); */
+  
+//   db_query("DELETE FROM {better_formats_defaults} WHERE format = 2");
+}
+
+/**
+ * Set the module weight
+ */
+function gsa_config_set_weight() {
+  db_update('system')
+    ->fields(array('weight' => 20 ))
+    ->condition('name', 'gsa_config')
+    ->execute();
+  
+//   db_query("UPDATE {system} SET weight = 20 WHERE name = 'gsa_config'");
+}
+
+/**
+ * Disable the global context from Commons
+ * Disable all blocks
+ * Configure the roles
+ */
+function gsa_config_update_6000() {
+  /* gsa_config_disable_global_context();
+  gsa_config_disable_all_blocks(); */
+  /* gsa_config_roles(); */
+  return array();
+}
+
+
+/**
+ * Revert the variables
+ */
+function gsa_config_update_6001() {
+  /* module_load_include('inc', 'gsa_config', 'gsa_config.defaults');
+  foreach (_gsa_config_strongarm() as $var => $value) {
+    variable_del($var);
+  }
+  return array(); */
+}
+
+/**
+ * Ensure no user has an access of 0
+ */
+function gsa_config_update_6002() {
+  /* $users = db_query("SELECT * FROM {users} WHERE access = 0");
+  while ($user = db_fetch_object($users)) {
+    db_query("UPDATE {users} SET access = %d WHERE uid = %d", $user->created, $user->uid);
+  }
+  return array(); */
+}
+
+/**
+ * Disable the 'tweets' view
+ */
+function gsa_config_update_6003() {
+  /* gsa_config_override_views();
+  return array(); */
+}
+
+/**
+ * Set the module weight
+ */
+function gsa_config_update_6004() {
+  gsa_config_set_weight();
+  return array();
+}
+
+/**
+ * Remove better format defaults for full html
+ */
+function gsa_config_update_6005() {
+  /* gsa_config_remove_better_formats(); */
+  return array();
+}
+
+/**
+ * Enable og_user_roles
+ */
+function gsa_config_update_6006() {
+  /* module_enable(array('og_user_roles'));
+  return array(); */
+}
+
+/**
+ * Install og_user_roles
+ */
+function gsa_config_update_6007() {
+  /* module_disable(array('og_user_roles'));
+  drupal_install_modules(array('og_user_roles'));
+  return array(); */
+}
+
+/**
+ * Enable gsa_slideshow
+ */
+function gsa_config_system_update_6008() {
+  /* features_install_modules(array('gsa_slideshow')); */
+  return array();
+}
+
+/**
+ * Create roles for community managers and contributors
+ */
+function gsa_config_update_6009() {
+  /* gsa_config_roles(); */
+  return array();
+}
+
+/**
+ * Create a footer links menu
+ */
+function gsa_config_update_6010() {
+  // Create the menu
+  $menu = new stdClass;
+  $menu->menu_name = 'menu-footer';
+  $menu->title = t('Footer links');
+  $menu->description = t('The links on the right side of the footer');
+  drupal_write_record('menu_custom', $menu);
+  
+  // Clear the block cache
+  _block_rehash();
+  
+  // Remove the title from the menu block
+  db_update('blocks')
+    ->fields(array('title' => '<none>'))
+    ->condition('delta', 'menu-footer', '=')
+    ->execute();
+  
+  /* db_query("UPDATE {blocks} SET title = '<none>' WHERE delta = 'menu-footer'"); */
+  
+  return array();
+}
+
+/**
+ * Disable commons_notifications, enable gsa_notifications
+ */
+function gsa_config_update_6011() {
+  /* drupal_uninstall_module('commons_notifications');
+  features_install_modules(array('gsa_notifications'));
+  return array(); */
+}
+
+/**
+ * Enable addtoany
+ */
+function gsa_config_update_6012() {
+  /* drupal_install_modules(array('addtoany')); */
+  return array();
+}
+
+/**
+ * Set default description for sitewide RSS block.
+ */
+function gsa_config_update_6013() {
+  variable_set('gsa_config_sitewide_rss_description', 'Get updates via RSS.');
+}
+
+/**
+ * Enable backup_migrate
+ */
+function gsa_config_update_6014() {
+  /* drupal_install_modules(array('backup_migrate')); */
+  return array();
+}
+
+/**
+ * Enable gsa_group_autojoin
+ */
+function gsa_config_update_6015() {
+  /* drupal_install_modules(array('gsa_group_autojoin')); */
+  return array();
+}
+
+/**
+ * Enable gsa_group_bypass
+ */
+function gsa_config_update_6016() {
+  /* drupal_install_modules(array('gsa_group_bypass')); */
+  return array();
+}
+
+/**
+ * Enable gsa_og_user_roles
+ */
+function gsa_config_update_6017() {
+  /* drupal_install_modules(array('gsa_og_user_roles'));
+  return array(); */
+}
+
+/**
+ * Enable og_features
+ */
+function gsa_config_update_6018() {
+  /* drupal_install_modules(array('og_features'));
+  return array(); */
+}
+
+/**
+ * Enable gsa_bpa
+ */
+function gsa_config_update_6019() {
+  /* features_install_modules(array('gsa_bpa')); */
+  return array();
+}
+
+/**
+ * Enable og_comment_approval
+ */
+function gsa_config_update_6020() {
+  /* drupal_install_modules(array('og_comment_approval'));
+  return array(); */
+}
+
+/**
+ * Enable gsa_cpat
+ */
+function gsa_config_update_6021() {
+  /* features_install_modules(array('gsa_cpat')); */
+  return array();
+}
+
+/**
+ * Enable gsa_tokens
+ */
+function gsa_config_update_6022() {
+  /* drupal_install_modules(array('gsa_tokens')); */
+  return array();
+}
+
+/**
+ * Enable og_revision_mod
+ */
+function gsa_config_update_6023() {
+  /* drupal_install_modules(array('og_revision_mod'));
+  return array(); */
+}
+
+/**
+ * Enable gsa_bbw
+ */
+function gsa_config_update_6024() {
+  drupal_install_modules(array('gsa_bbw'));
+  return array();
+}
+
+/**
+ * Update 7001: Enabling GSA Utility Module
+ */
+function gsa_config_update_7001() {  
+
+	$modules = array('gsa_util'); // Array of module names
+	$enable_dependencies = TRUE; // Whether or not to enable dependant modules
+
+	module_enable($modules, $enable_dependencies);
+}
+
+/**
+ * Update 7002: Change the user welcome email text regarding passwords.
+ */
+function gsa_config_update_7002() {
+  $message = str_replace(
+    'change your password',
+    'choose a password',
+    variable_get('user_mail_register_no_approval_required_body', '')
+  );
+  variable_set('user_mail_register_no_approval_required_body', $message);
+}
+
+/**
+ * Update 7003: Change the body for password recovery email
+ */
+function gsa_config_update_7003() {
+  $message = "[user:name],
+
+A request to retrieve the username and/or reset the password for your account has been made at [site:name].
+
+Your username is [user:name] and will remain the same once you’ve reset your password.
+
+You may now log in to [site:url-brief] by clicking on this link or copying and pasting it in your browser:
+
+[user:one-time-login-url]
+
+This login link can be used only once. It expires after one day and nothing will happen if it's not used. 
+
+After logging in, you will be redirected to your account page so you can change your password.";
+
+  variable_set('user_mail_password_reset_body', $message);
+}
+
+
+/**
+ * Update 7004: Giving Organic group permission to administer member.
+ */
+function gsa_config_update_7004() {
+
+  $result = db_select('og_role')
+  ->fields('og_role',array('rid'))
+  ->condition('name', 'administrator member','=')
+  ->execute();
+   
+  while ($row = $result->fetchAssoc()) {
+	
+	//Giving Create permission
+	db_merge('og_role_permission')
+	->key(array(
+		'rid' => $row['rid'],
+		'permission' => 'create group_feed content',
+		'module' => 'og_create_perms',
+	))
+	->fields(array(
+		'rid' => $row['rid'],
+		'permission' => 'create group_feed content',
+		'module' => 'og_create_perms',
+	))
+	->execute();
+	
+	db_merge('og_role_permission')
+	->key(array(
+		'rid' => $row['rid'],
+		'permission' => 'create group_feed_item content',
+		'module' => 'og_create_perms',
+	))
+	->fields(array(
+		'rid' => $row['rid'],
+		'permission' => 'create group_feed_item content',
+		'module' => 'og_create_perms',
+	))
+	->execute();
+	
+	//Giving Edit Permission
+	db_merge('og_role_permission')
+	->key(array(
+		'rid' => $row['rid'],
+		'permission' => 'update any group_feed content',
+		'module' => 'og',
+	))
+	->fields(array(
+		'rid' => $row['rid'],
+		'permission' => 'update any group_feed content',
+		'module' => 'og',
+	))
+	->execute();
+	db_merge('og_role_permission')
+	->key(array(
+		'rid' => $row['rid'],
+		'permission' => 'update any group_feed_item content',
+		'module' => 'og',
+	))
+	->fields(array(
+		'rid' => $row['rid'],
+		'permission' => 'update any group_feed_item content',
+		'module' => 'og',
+	))
+	->execute();
+	
+	//Giving Delete Permission
+	db_merge('og_role_permission')
+	->key(array(
+		'rid' => $row['rid'],
+		'permission' => 'delete any group_feed content',
+		'module' => 'og',
+	))
+	->fields(array(
+		'rid' => $row['rid'],
+		'permission' => 'delete any group_feed content',
+		'module' => 'og',
+	))
+	->execute();
+	db_merge('og_role_permission')
+	->key(array(
+		'rid' => $row['rid'],
+		'permission' => 'delete any group_feed_item content',
+		'module' => 'og',
+	))
+	->fields(array(
+		'rid' => $row['rid'],
+		'permission' => 'delete any group_feed_item content',
+		'module' => 'og',
+	))
+	->execute();
+  }
+
+}
+
+
+/**
+ * Update 7005: Giving Organic group permission by administer group permission.
+ */
+function gsa_config_update_7005() {
+
+    $result = db_select('og_role_permission')
+  ->fields('og_role_permission',array('rid'))
+  ->condition('permission', 'administer group','=')
+  ->execute();
+   
+  while ($row = $result->fetchAssoc()) {
+	
+	//Giving Create permission
+	db_merge('og_role_permission')
+	->key(array(
+		'rid' => $row['rid'],
+		'permission' => 'create group_feed content',
+		'module' => 'og_create_perms',
+	))
+	->fields(array(
+		'rid' => $row['rid'],
+		'permission' => 'create group_feed content',
+		'module' => 'og_create_perms',
+	))
+	->execute();
+	
+	db_merge('og_role_permission')
+	->key(array(
+		'rid' => $row['rid'],
+		'permission' => 'create group_feed_item content',
+		'module' => 'og_create_perms',
+	))
+	->fields(array(
+		'rid' => $row['rid'],
+		'permission' => 'create group_feed_item content',
+		'module' => 'og_create_perms',
+	))
+	->execute();
+	
+	//Giving Edit Permission
+	db_merge('og_role_permission')
+	->key(array(
+		'rid' => $row['rid'],
+		'permission' => 'update any group_feed content',
+		'module' => 'og',
+	))
+	->fields(array(
+		'rid' => $row['rid'],
+		'permission' => 'update any group_feed content',
+		'module' => 'og',
+	))
+	->execute();
+	db_merge('og_role_permission')
+	->key(array(
+		'rid' => $row['rid'],
+		'permission' => 'update any group_feed_item content',
+		'module' => 'og',
+	))
+	->fields(array(
+		'rid' => $row['rid'],
+		'permission' => 'update any group_feed_item content',
+		'module' => 'og',
+	))
+	->execute();
+	
+	//Giving Delete Permission
+	db_merge('og_role_permission')
+	->key(array(
+		'rid' => $row['rid'],
+		'permission' => 'delete any group_feed content',
+		'module' => 'og',
+	))
+	->fields(array(
+		'rid' => $row['rid'],
+		'permission' => 'delete any group_feed content',
+		'module' => 'og',
+	))
+	->execute();
+	db_merge('og_role_permission')
+	->key(array(
+		'rid' => $row['rid'],
+		'permission' => 'delete any group_feed_item content',
+		'module' => 'og',
+	))
+	->fields(array(
+		'rid' => $row['rid'],
+		'permission' => 'delete any group_feed_item content',
+		'module' => 'og',
+	))
+	->execute();
+  }
+
+}
+
+/**
+ * Update the Agency profile field description.
+ */
+function gsa_config_update_7006() {
+  db_update('profile_field')
+  ->condition('title', 'Agency', '=')
+  ->fields(array(
+    'explanation' =>
+    'If you are a Federal, State or Local government employee, or with the military, please select your Agency/Branch and then enter your office/department in the Organization field. If you are an Industry, Non-Profit or Association employee, please select "Other - Industry, Non-Profit, Associations."'
+  ))
+  ->execute();
+}
+
+/**
+ * Disabled the galleria module.
+ */
+function gsa_config_update_7007() {
+ module_disable(array('galleria'));
+}
+
+/**
+ * Update the footer logo block.
+ */
+function gsa_config_update_7008() {
+  $body = '<p><img alt="GSA logo" src="/sites/default/files/logo.png" style="width: 42px; height: 42px;">&nbsp;&reg;</p>';
+  db_update('block_custom')
+  ->condition('bid', '6', '=')
+  ->fields(array(
+    'body' => $body,
+  ))
+  ->execute();
+}

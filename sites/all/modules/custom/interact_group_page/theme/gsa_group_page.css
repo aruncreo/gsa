@@ -1,0 +1,166 @@
+body.gsa-group-page .breadcrumb {
+  display: none;
+}
+
+body.gsa-group-page .arttabs_primary {
+/*  display: none; */
+}
+
+body.node-type-group .arttabs_primary {
+  display: none;
+}
+
+body.gsa-group-page .gs-sidebar1 {
+  display: none;
+}
+
+body.gsa-group-page h1 {
+  margin: 10px 60px;
+  font-size: 32px;
+  clear: both;
+  color: #00467f;
+  font-family: 'OpenSansSemibold';
+}
+
+#group-sub-menu {
+  clear: both;
+  width: 100%;
+}
+
+#group-sub-menu,#group-sub-menu a {
+  color: #404041;
+  text-decoration: none;
+  font-weight: normal;
+  font-size: 16px;
+  text-transform: lowercase;
+}
+
+#group-sub-menu ul {
+  float: left;
+  margin: 0 0 0 20px;
+  padding: 0;
+  line-height: 20px;
+}
+
+#group-sub-menu ul li {
+  width: auto;
+  float: left;
+  margin: 0;
+  padding: 0 15px 0 5px;
+  position: relative;
+}
+
+#group-sub-menu ul li span {
+  display: block;
+  cursor: pointer;
+  text-indent: 15px;
+  background: url("images/gsa-menu-down.png") no-repeat scroll left 8px transparent;
+}
+
+#group-sub-menu ul ul {
+  z-index: 10;
+  top: 20px;
+  left: 0;
+  position: absolute;
+  width: auto;
+  margin: 0 0 0 15px;
+  display: none;
+  background: #fff;
+}
+
+#group-sub-menu ul ul li:FIRST-CHILD {
+  border-top: 1px solid #cccccc;
+}
+
+#group-sub-menu ul ul li {
+  clear: both;
+  position: static;
+  border: 1px solid #cccccc;
+  border-top: 0 none;
+  padding: 0 5px;
+  width: 130px;
+}
+
+#group-sub-menu ul li:HOVER ul {
+  display: block;
+}
+
+#group-sub-menu ul ul:HOVER {
+  display: block;
+}
+
+.gsa-menu-search-link {
+  background: url('images/gsa-search-icon.png') no-repeat;
+  background-position: 0 5px;
+  padding-left: 20px;
+  display: block;
+}
+
+.view-gsa-group-search ul {
+  margin: 0!important;
+}
+
+.view-gsa-group-search li::before {
+  content: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.view-gsa-group-search li {
+  margin: 0 0 15px !important;
+}
+
+.view-gsa-group-search .views-submit-button {
+  margin-top: 25px;
+}
+
+.heartbeat-messages-wrapper .heartbeat-activity img{
+  margin: 0 10px 0 0 !important;
+  float: left !important;
+}
+
+.heartbeat-messages-wrapper .heartbeat-activity {
+  float: left;
+  clear: both;
+  width: 100%;
+}
+
+.heartbeat-messages-wrapper .heartbeat-group-left {
+  width: 70px!important;
+}
+
+.heartbeat-messages-wrapper .heartbeat-group-content {
+  width: 420px!important;
+}
+
+.heartbeat-messages-wrapper .group-content {
+  float: left;
+  clear: both;
+  width: 100%;
+}
+
+.heartbeat-messages-wrapper .group-footer {
+  float: left;
+  clear: both;
+  width: 100%;
+}
+
+.heartbeat-messages-wrapper ul li::before {
+  content: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.heartbeat-stream blockquote {
+  background: none !important;
+}
+
+.view-gsa-og-members.view-display-id-page_1 li.views-row {
+  float: left;
+  width: 22%;
+  margin: 0 10px 15px 0;
+}
+
+.view-gsa-og-members.view-display-id-page_1 li.views-row img {
+  margin: 0 !important;
+}

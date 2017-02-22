@@ -1,0 +1,5 @@
+name = GSA OG Default Roles
+description = GSA Interact Configuration for OG Default Roles
+core = 7.x
+php = 5.3
+dependencies[] = og_group_defaultroles

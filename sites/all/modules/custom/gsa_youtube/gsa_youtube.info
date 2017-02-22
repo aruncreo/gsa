@@ -1,0 +1,8 @@
+name = GSA Youtube
+description = Provide a custom field to render youtube video in any content type in gallery format. (has dependencies and or required by)
+package = GSA
+core = 7.x
+
+
+
+

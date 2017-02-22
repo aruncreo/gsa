@@ -1,0 +1,4 @@
+name = "OG Migrate Members"
+core = 7.x
+description = Copy memberships between OG groups
+dependencies[] = og

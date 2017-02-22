@@ -1,0 +1,89 @@
+<?php
+
+/**
+ * Update 7001: Organic group field permission for new announcement block
+ */
+function gsa_group_page_update_7001() {
+ 
+  $or = db_or()->condition('name', 'member')->condition('name', 'non-member');
+  
+  $result = db_select('og_role')
+  ->fields('og_role',array('rid'))
+  ->condition($or)
+  ->execute();
+   
+  while ($row = $result->fetchAssoc()) {
+	//Giving View permission
+	db_merge('og_role_permission')
+	->key(array(
+		'rid' => $row['rid'],
+		'permission' => 'view field_announcement_title2 field',
+		'module' => 'og_field_access',
+	))
+	->fields(array(
+		'rid' => $row['rid'],
+		'permission' => 'view field_announcement_title2 field',
+		'module' => 'og_field_access',
+	))
+	->execute();
+	
+	db_merge('og_role_permission')
+	->key(array(
+		'rid' => $row['rid'],
+		'permission' => 'view field_announcement_body2 field',
+		'module' => 'og_field_access',
+	))
+	->fields(array(
+		'rid' => $row['rid'],
+		'permission' => 'view field_announcement_body2 field',
+		'module' => 'og_field_access',
+	))
+	->execute();
+  }
+  
+  $result2 = db_select('og_role')
+  ->fields('og_role',array('rid'))
+  ->condition('name', 'administrator member','=')
+  ->execute();
+  
+  while ($row = $result2->fetchAssoc()) {
+	db_merge('og_role_permission')
+	->key(array(
+		'rid' => $row['rid'],
+		'permission' => 'update field_announcement_body2 field',
+		'module' => 'og_field_access',
+	))
+	->fields(array(
+		'rid' => $row['rid'],
+		'permission' => 'update field_announcement_body2 field',
+		'module' => 'og_field_access',
+	))
+	->execute();
+	db_merge('og_role_permission')
+	->key(array(
+		'rid' => $row['rid'],
+		'permission' => 'update field_announcement_title2 field',
+		'module' => 'og_field_access',
+	))
+	->fields(array(
+		'rid' => $row['rid'],
+		'permission' => 'update field_announcement_title2 field',
+		'module' => 'og_field_access',
+	))
+	->execute();
+	db_merge('og_role_permission')
+	->key(array(
+		'rid' => $row['rid'],
+		'permission' => 'update field_group_announcment_display2 field',
+		'module' => 'og_field_access',
+	))
+	->fields(array(
+		'rid' => $row['rid'],
+		'permission' => 'update field_group_announcment_display2 field',
+		'module' => 'og_field_access',
+	))
+	->execute();
+	
+	 
+  }
+}

@@ -1,0 +1,93 @@
+<?php
+
+/**
+ * Implements hook_menu().
+ */
+function gsa_ogdr_menu() {
+  $path = drupal_get_path('module', 'gsa_ogdr');
+  $items = array();
+  $items['group/%/%/admin/modifyroles'] = array(
+    'title' => t('Bulk assign roles'),
+    'description' => t('Modify user role assignments according to rules'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('gsa_ogdr_modifyroles', 1, 2),
+    'access callback' => 'gsa_ogdr_bulk_modify_access',
+    'access arguments' => array(1, 2),
+    'file path' => $path,
+    'file' => 'includes/gsa_ogdr.pages.inc',
+    'weight' => 10,
+    'type' => MENU_LOCAL_TASK,
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_og_ui_get_group_admin().
+ */
+function gsa_ogdr_og_ui_get_group_admin() {
+  $items = array();
+  $items['gsa_group_bulk_assign_roles'] = array(
+    'title' => t('Bulk assign roles'),
+    'description' => t('Modify user role assignments according to rules'),
+    'href' => 'admin/modifyroles',
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_og_group_defaultroles_conditions().
+ */
+function gsa_ogdr_og_group_defaultroles_conditions() {
+  $conditions = array(
+    'gsa_ogdr_user_gsa_email' => 'User has GSA email address',
+    'gsa_ogdr_user_govmil_email' => 'User has .gov/.mil email address',
+  );
+  return $conditions;
+}
+
+/**
+ * Test condition function.
+ */
+function gsa_ogdr_user_gsa_email($gid, $account = NULL) {
+  global $user;
+  if ($account == NULL) {
+    $account = $user;
+  }
+  return strtolower(substr($account->mail, stripos($account->mail, "@") + 1)) == 'gsa.gov';
+}
+
+/**
+ * Test condition function.
+ */
+function gsa_ogdr_user_govmil_email($gid, $account = NULL) {
+  global $user;
+  if ($account == NULL) {
+    $account = $user;
+  }
+  $extension = strtolower(substr($account->mail, -4));
+  return $extension == '.gov' || $extension == '.mil';
+}
+
+/**
+ * Access callback for group role bulk modify ops.
+ */
+function gsa_ogdr_bulk_modify_access($entity_type, $entity_id) {
+  // Load the group
+  if ($group = og_get_group($entity_type, $entity_id)) {
+    if (og_user_access($group->gid, 'administer group')) {
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
+/**
+ * Batch operation callback for bulk modify
+ */
+function gsa_ogdr_modifyroles_op($gid, $uid, $rid, $op) {
+  if ($op == 'add') {
+    og_role_grant($gid, $uid, $rid);
+  } else {
+    og_role_revoke($gid, $uid, $rid);
+  }
+}

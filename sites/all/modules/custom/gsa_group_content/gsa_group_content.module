@@ -1,0 +1,58 @@
+<?php
+/**
+ * @file
+ * Code for the GSA Group Content feature.
+ */
+
+include_once 'gsa_group_content.features.inc';
+
+/**
+ * Implements hook_form_FORMID_alter().
+ *
+ * Hide group_group field from non-site admins.
+ */
+function gsa_group_content_form_node_form_alter(&$form, &$form_state) {
+  if (!user_access('administer content types')) {
+    $form['group_group'][LANGUAGE_NONE]['#type'] = 'value';
+  }
+}
+
+/**
+ * Implements hook_field_access().
+ *
+ * @param  $op
+ *   The operation to be performed
+ * @param  $field
+ *   The field on which the operation is to be performed
+ * @param  $entity_type
+ *   The type of $entity
+ * @param  $entity
+ *   The entity for the operation
+ * @param  $account
+ *   The account to check
+ * 
+ * @return
+ *  TRUE if the operation is allowed, and FALSE if the operation is denied.
+ *
+ * @todo: Determine why standard field permissions aren't sufficient.
+ */
+function gsa_group_content_field_access($op, $field, $entity_type, $entity, $account) {
+  global $user;
+
+  if ($field['field_name'] == 'field_archive' || $field['field_name'] == 'field_featured_content' || $field['field_name'] == 'field_group_sticky' && $op == 'edit') {
+
+    // Generating the permission string
+    $perm = ($op == 'view') ? 'view ' . $field['field_name'] . ' field' : 'update ' . $field['field_name'] . ' field';
+  
+    // Getting the current group from context
+    $group = og_context();
+  
+    // If the user is superadmin bypass the access check
+    if ($user->uid == 1) {
+      return TRUE;
+    }
+  
+    // Determine access
+    return og_user_access($group->gid, $perm, $user);
+  }
+}

@@ -1,0 +1,159 @@
+<?php
+/**
+ * $Id: gsa_aggregator.module 125 2012-08-21 13:10:09Z rahulp $
+ */
+
+
+/**
+ * Implements hook_init().
+ */
+function gsa_aggregator_init() {
+  $module_path = drupal_get_path('module', 'gsa_aggregator');
+  drupal_add_css($module_path .'/gsa_aggregator.css');
+}
+
+
+/**
+ * Implements hook_menu().
+ */
+function gsa_aggregator_menu() {
+  $items = array();
+  
+  $items['node/%node/group-feeds'] = array(
+      'title' => 'Group feeds',
+      'description' => "List of feeds for this group.",
+      'page callback' => 'gsa_aggregator_feeds_list',
+      'page arguments' => array(1),
+      'access arguments' => array('access administration pages'),
+      'type' => MENU_NORMAL_ITEM,
+  );
+  
+  $items['node/%node/group-feeds/add/feed'] = array(
+      'title' => 'Add feed',
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('gsa_aggregator_form_feed'),
+      'access arguments' => array('administer news feeds'),
+      'type' => MENU_LOCAL_ACTION,
+      'file' => 'gsa_aggregator.inc',
+  );
+  
+  $items['node/group-feeds/edit/feed/%aggregator_feed'] = array(
+      'title' => 'Edit feed',
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('gsa_aggregator_form_feed', 4),
+      'access arguments' => array('administer news feeds'),
+      'file' => 'gsa_aggregator.inc',
+  );
+  
+  $items['node/group-feeds/delete/feed/%aggregator_feed'] = array(
+      'title' => 'Remove items',
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('gsa_aggregator_delete_feed', 4),
+      'access arguments' => array('administer news feeds'),
+      'file' => 'gsa_aggregator.inc',
+  );
+  
+  return $items;
+}
+
+/**
+ * Implementation of hook_block_info()
+ */
+function gsa_aggregator_block_info() {
+  $blocks['gsa_group_block']['info'] = t('Group Rss');
+  return $blocks;
+}
+
+
+/**
+ * Implementation of hook_block_view()
+ */
+function gsa_aggregator_block_view($delta = '') {
+  switch ($delta) {
+    case 'gsa_group_block':
+      $block['subject'] = t('Group Rss Feed');
+      $block['content'] = _gsa_group_block();
+      break;
+  }
+  return $block;
+}
+
+function gsa_aggregator_feeds_list($group) {
+  if($group->type != 'group') {
+    drupal_not_found();
+    exit;
+  }
+  
+  $category_title = 'group-'. $group->nid;
+  
+  $category = db_query("SELECT * FROM {aggregator_category} WHERE title = :title", array(':title' => $category_title))->fetchObject();
+  
+  if(empty($category)) {
+    $new = db_insert('aggregator_category')
+    ->fields(array(
+        'title' => $category_title,
+        'description' => t('Category for feeds related to specific group page'),
+        'block' => 3,
+    ))
+    ->execute();
+    
+    $category = db_query("SELECT * FROM {aggregator_category} WHERE title = :title", array(':title' => $category_title))->fetchObject();
+  }
+
+  $feeds_result = db_query("SELECT fid from aggregator_category_feed WHERE cid = :cid", array(":cid" => $category->cid))->fetchAllAssoc('fid');
+  foreach($feeds_result AS $f) {
+    $feed_ids[] = $f->fid;
+  }
+  
+  $output = '<h3>' . t('Group Feeds') . '</h3>';
+  
+  if($feed_ids) {
+  $result = db_query('SELECT f.fid, f.title, f.url, f.refresh, f.checked, f.link, f.description, f.hash, f.etag, f.modified,
+        f.image, f.block, COUNT(i.iid) AS items FROM {aggregator_feed} f
+      LEFT JOIN {aggregator_item} i ON f.fid = i.fid
+      WHERE f.fid in (:feed_ids)
+      GROUP BY f.fid, f.title, f.url, f.refresh, f.checked, f.link, f.description, f.hash, f.etag, f.modified, f.image, f.block
+      ORDER BY f.title
+      ', array(':feed_ids' => $feed_ids));
+  
+  
+  
+    $header = array(t('Title'), t('Items'), t('Last update'), t('Next update'), array('data' => t('Operations'), 'colspan' => '3'));
+    $rows = array();
+    foreach ($result as $feed) {
+      $rows[] = array(
+          l($feed->title, "aggregator/sources/$feed->fid"),
+          format_plural($feed->items, '1 item', '@count items'),
+          ($feed->checked ? t('@time ago', array('@time' => format_interval(REQUEST_TIME - $feed->checked))) : t('never')),
+          ($feed->checked && $feed->refresh ? t('%time left', array('%time' => format_interval($feed->checked + $feed->refresh - REQUEST_TIME))) : t('never')),
+          l(t('edit'), "node/group-feeds/edit/feed/$feed->fid", array('query' => drupal_get_destination())),
+          l(t('delete'), "node/group-feeds/delete/feed/$feed->fid", array('query' => drupal_get_destination())),
+      );
+    }
+
+    $output .= theme('table', array('header' => $header, 'rows' => $rows, 'empty' => t('No feeds available. <a href="@link">Add feed</a>.', array('@link' => url('admin/config/services/aggregator/add/feed')))));
+  }
+  else {
+    $output .= '<p>No Feed sources added yet.</p>';
+  }
+  
+  
+  return $output;
+}
+
+function _gsa_group_block(){
+  $nid = arg(1);
+  $category_title = 'group-'.$nid;
+  
+  $category = db_query("SELECT * FROM {aggregator_category} WHERE title = :title", array(':title' => $category_title))->fetchObject();
+  $cid = $category->cid;
+  
+  if($cid){
+    $block = module_invoke('aggregator', 'block_view', 'category-'.$cid);
+    $content = $block['content'];
+  }else{
+    $content = null;
+  }
+    
+  return  $content;
+}

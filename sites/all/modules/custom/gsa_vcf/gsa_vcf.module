@@ -1,0 +1,112 @@
+<?php
+// $Id: gsa_vcf.module 6 2012-06-19 23:25:16Z nikunjk $
+/**
+ * @file
+ * Provides Features support for MediaFront module, via exportables support module.
+ *
+ */
+
+/**
+ * Implementation of hook_exportables().
+ * @return array
+ */
+function gsa_vcf_exportables() {
+  return array(
+    'views_calc_fields' => array(
+      'hook name'         => 'views_calc_fields_defaults',
+      'load function'     => 'gsa_vcf_fields_load',
+      'save function'     => 'gsa_vcf_fields_save',
+      'delete function'   => 'gsa_vcf_fields_delete',
+      'load all function' => 'gsa_vcf_fields_loadall',
+      'id property'       => 'cid',
+      'title property'    => 'label',
+      'storage type'      => 'array',
+    ),
+  );
+}
+
+/**
+ * Implementation of hook_features_api().
+ */
+function gsa_vcf_features_api() {
+  return array(
+    'views_calc_fields' => array(
+      'name' => t('Views Calc fields table'),
+      'default_hook' => 'views_calc_fields_defaults',
+      'features_source' => TRUE,
+    ),
+  );
+}
+
+/**
+ * Implementation of hook_features_export().
+ */
+function views_calc_fields_features_export($data, &$export, $module_name = '') {
+  // first do the standard exportables export
+  $pipe = _exportables_features_export('views_calc_fields', $data, $export, $module_name);
+
+  return $pipe;
+}
+
+/**
+ * Implementation of hook_features_export_options().
+ */
+function views_calc_fields_features_export_options() {
+  return _exportables_features_export_options('views_calc_fields');
+}
+
+/**
+ * Implementation of hook_features_export_render().
+ */
+function views_calc_fields_features_export_render($module, $data) {
+  return _exportables_features_export_render('views_calc_fields', $module, $data);
+}
+
+/**
+ * function used by exportables to load a row from the table
+ * 
+ * @param unknown_type $cid
+ * @return unknown_type
+ */
+function gsa_vcf_fields_load($cid) {
+  return db_fetch_array(db_query("SELECT * FROM {views_calc_fields} WHERE cid = %d", $cid));
+}
+
+/**
+ * function used by exportables to save a row to the table
+ * 
+ * @param unknown_type $data
+ * @return unknown_type
+ */
+function gsa_vcf_fields_save($data) {
+  return db_query("INSERT INTO {views_calc_fields} (cid, label, format, custom, base, tablelist, fieldlist, calc) 
+                   VALUES (%d, '%s', '%s', '%s', '%s', '%s', '%s', '%s') 
+                   ON DUPLICATE KEY UPDATE label='%s', format='%s', custom='%s', base='%s', tablelist='%s', fieldlist='%s', calc='%s'", 
+                   $data['cid'], $data['label'], $data['format'], $data['custom'], $data['base'], $data['tablelist'], $data['fieldlist'], $data['calc'],
+                   $data['label'], $data['format'], $data['custom'], $data['base'], $data['tablelist'], $data['fieldlist'], $data['calc']);
+}
+
+/**
+ * function used by exportables to delete a row from the table
+ * 
+ * @param unknown_type $cid
+ * @return unknown_type
+ */
+function gsa_vcf_fields_delete($cid) {
+  return db_query("DELETE FROM {views_calc_fields} WHERE cid = %d", $cid);
+}
+
+/**
+ * function used by exportables to load all rows from the table
+ * 
+ * @return unknown_type
+ */
+function gsa_vcf_fields_loadall() {
+  $options = array();
+  $result = db_query('SELECT * FROM {views_calc_fields}');
+  while ($row = db_fetch_object($result)) {
+    $options[$row->cid] = $row;
+  }
+  asort($options);
+  return $options;
+}

@@ -1,0 +1,6 @@
+name = "Interact Friend Activity"
+package = "Interact"
+description = "Provide an alternate heartbeat stream excluding user's own activity"  (has dependencies and or required by)
+core = 7.x
+version = 7.x-1.0
+files[] = streams/gsarelationsactivity.inc

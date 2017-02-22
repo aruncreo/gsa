@@ -1,0 +1,12 @@
+name = "GSA BBW"
+package = "GSA"
+project = "gsa_cpat"
+core = "7.x"
+description = "Business Breakthrough Workshops."
+
+files[] = gsa_bbw.module
+
+configure = admin/config/group/gsabbw
+
+dependencies[] = "og"
+dependencies[] = "webform"

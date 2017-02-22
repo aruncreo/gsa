@@ -1,0 +1,4 @@
+name = GSA group autojoin
+description = "Automatically enroll users in groups upon site registration"
+core = 7.x
+dependencies[] = og

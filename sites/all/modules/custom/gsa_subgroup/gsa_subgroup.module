@@ -1,0 +1,133 @@
+<?php
+
+
+/**
+* Implements hook_og_membership_insert().
+* @param  $og_membership
+*   The membership object
+*/
+function gsa_subgroup_form_alter(&$form, $form_state, $form_id) {	
+	if($form_id == 'group_node_form'){
+	    // to filter parent groups
+		foreach($form['group_audience']['und']['#options'] as &$group_group ){
+			foreach($group_group as $key=>$val){
+					$sub_group = og_load($key);	
+					if(!empty($sub_group->entity->group_audience)){
+					
+					unset($group_group[$key]);
+					
+					}
+					
+			}
+		}
+
+		$form['#validate'][] = 'gsa_subgroup_group_node_form_validate_handler';
+	}
+	
+	 if (isset($form_id) && $form_id == 'og_ui_confirm_subscribe') {
+        $form['#submit'][] = 'gsa_subgroup_og_ui_confirm_subscribe_submit_handler';
+    }
+	
+	 if (isset($form_id) && $form_id == 'user_register_form') {
+        $form['#submit'][] = 'gsa_subgroup_user_register_form_submit_handler';
+    }
+	
+}
+
+// subscribe user to parent group after subscription of a subgroup
+function gsa_subgroup_og_ui_confirm_subscribe_submit_handler($form, &$form_state) {
+
+    $gid = $form_state['values']['group']->gid;
+    $uid = $form_state['values']['account']->uid;
+
+    $parent_group = og_load($gid);
+    $account = user_load($uid);
+    
+	$values = array(
+        'entity_type' => 'user',
+        'entity' => $account,
+        'state' => OG_STATE_ACTIVE,
+       );
+	// Checking group audience of the group( the group is parent group if it has empty group audience.)   
+	if(!empty($parent_group->entity->group_audience['und'])){
+		foreach($parent_group->entity->group_audience['und'] as $parent_group_data){
+			
+			if($parent_group_data['gid']>0) {		
+			    // subscribe user to parent group
+				og_group($parent_group_data['gid'], $values);	
+			}	
+		}
+	}
+    return $form;
+}
+
+// subscribe user to parent group after registration with subgroup
+function gsa_subgroup_user_register_form_submit_handler($form, &$form_state) {
+
+    $group_arr = $form_state['values']['group_audience']['und'];
+    $uid = $form_state['values']['uid'];
+    $account = user_load($uid);
+    
+	$values = array(
+        'entity_type' => 'user',
+        'entity' => $account,
+        'state' => OG_STATE_ACTIVE,
+       );
+
+	if(!empty($group_arr)){
+		foreach($group_arr as $group ){
+			$parent_group = og_load($group['gid']);
+			// Checking group audience of the group( the group is parent group if it has empty group audience.)
+			if(!empty($parent_group->entity->group_audience['und'])){ 
+				foreach($parent_group->entity->group_audience['und'] as $parent_group_data){
+					
+					if($parent_group_data['gid']>0) {		
+						// subscribe user to parent group
+						og_group($parent_group_data['gid'], $values);	
+					}	
+				}
+			}
+		}	
+	}
+
+    return $form;
+}
+
+function gsa_subgroup_group_node_form_validate_handler($form, &$form_state) {
+	$gid = 0 ;
+	$nid = $form_state['values']['nid'];
+	$title = $form_state['values']['title'];
+
+	if(count($form_state['values']['group_audience']['und'])>100) {
+		
+		form_set_error("group_audience", "You can select only single group audience.");
+
+	} else {
+	  $group_audience = $form_state['values']['group_audience']['und'][0]['gid'];
+	  
+	  if(!empty($group_audience) && $group_audience >0 ) {
+		  $result = db_select('og', 'c')
+			->fields('c')
+			->condition('etid', $nid, '=')
+			->condition('entity_type', 'node', '=')
+			->execute()
+			->fetchAssoc();
+		  if ($result) {
+			$gid = $result['gid'];
+		  }
+		  
+		  if($gid >0) {
+			$result = db_query("SELECT node.nid AS nid FROM {node} node LEFT JOIN {field_data_group_audience} field_data_group_audience ON node.nid = field_data_group_audience.entity_id AND (field_data_group_audience.entity_type = 'node' AND field_data_group_audience.deleted = '0')
+		WHERE (( (field_data_group_audience.group_audience_gid = :gid ) )AND(( (node.status = '1') AND (node.type IN  ('group')) )))", array(':gid' => $gid));
+			$result->rowCount();
+			// if group has subgroups.   
+			if($result->rowCount()) {
+  // We Removed this error as we want groups to have subgroups
+				//form_set_error("group_audience", "'$title' is a parent group. You can not select group audience.");
+			}
+		  }
+	  }
+	}
+
+}
+

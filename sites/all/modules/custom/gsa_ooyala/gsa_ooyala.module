@@ -1,0 +1,269 @@
+<?php
+/**
+* @file
+* Provide a custom field to render ooyala video in gallery format in entity types
+*/
+
+/**
+ * Implements hook_menu().
+ */
+function gsa_ooyala_menu() {
+	$items = array();
+	
+	$items['ooyala-video/help'] = array(
+      'title' => t('Video tips'),
+      'description' => 'Ooyala Video Compose Tips',
+      'page callback' => 'gsa_ooyala_help_text',
+      'access callback' => true,
+      'type' => MENU_NORMAL_ITEM,
+    );
+    
+    return $items;
+}
+
+function gsa_ooyala_help_text(){
+	
+	$scriptText = highlight_string("<script src='//player.ooyala.com/v3/ODg2OGUwNDhhYWQ5NGVkMjZkYzU3MTg5'></script><div id='ooyalaplayer' style='width:1280px;height:720px'></div><script>OO.ready(function()
+{ OO.Player.create('ooyalaplayer', 'g3OGF3bDrSU6fMWBB9wgPnrQZ9k2DlSY'); }
+);</script><noscript><div>Please enable Javascript to watch this video</div></noscript>",TRUE);
+	
+	return "<h2>Embed Codes</h2><ul class='tips'><li style='list-style:none;' id='filter-filter_html_escape'>To post a video to Interact, the content creator will first need to make sure the video is posted on GSA's video platform Ooyala. Once the video is posted to Ooyala, a representation from Enterprise Web Management (EWM) will provide a code that will look similar to:<br/><br/>".$scriptText."<br/><br/>
+The content creator will then need pull out the actual embed code for use on Interact. Using the example above, the embed code would be: g3OGF3bDrSU6fMWBB9wgPnrQZ9k2DlSY<br/><br/>
+That embed code should then be placed in the designated field on the form. Please note when posting multiple videos, there will be a separate embed code for each video.</li></ul>";
+}
+
+/**
+* Implements hook_field_info().
+*/
+function gsa_ooyala_field_info() {
+  return array(
+    'gsa_ooyala_video_field' => array(
+      'label' => t('Ooyala Video'),
+      'description' => t('Provide a way to display ooyala video as a field'),
+      'default_widget' => 'gsa_ooyala_embed_code_list',
+      'default_formatter' => 'gsa_ooyala_embed_code_formatter',
+    ),
+  );
+}
+
+/**
+* Implements hook_field_is_empty().
+* 
+* @param $item
+*   An item that may or may not be empty.
+* @param $field
+*   The field to which $item belongs.
+* 
+* @return
+*   TRUE if $field's type considers $item not to contain any data; FALSE otherwise.
+*/
+function gsa_ooyala_field_is_empty($item, $field) {
+  return empty($item['embed_code']);
+}
+
+/**
+* Implements hook_field_formatter_info().
+*/
+function gsa_ooyala_field_formatter_info() {
+  return array(
+    'gsa_ooyala_embed_code_formatter' => array(
+      'label' => t('Ooyala Video Gallery'),
+      'field types' => array('gsa_ooyala_video_field'),
+    ),
+  );
+}
+
+/**
+* Implements hook_field_formatter_view().
+* 
+* @param $entity_type
+*   The type of $entity.
+* @param $entity
+*   The entity being displayed.
+* @param $field
+*   The field structure.
+* @param $instance
+*   The field instance.
+* @param $langcode
+*   The language associated with $items.
+* @param $items
+*   Array of values for this field.
+* @param $display
+*   The display settings to use.
+* 
+* @return
+*   A renderable array for the $items, as an array of child elements keyed by numeric indexes starting from 0.
+*/
+function gsa_ooyala_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  $element = array();
+
+  switch ($display['type']) {
+    case 'gsa_ooyala_embed_code_formatter':
+      $ooyala_data['ooyala_data']=$items;
+      $output = theme('gsa_ooyala_video_gallery', $ooyala_data);
+      $element[0] = array('#markup' => $output);
+    break;  
+  }
+
+  return $element;
+}
+
+
+/**
+* Implements hook_widget_info().
+*/
+function gsa_ooyala_field_widget_info() {
+  return array(
+    'gsa_ooyala_embed_code_list' => array(
+      'label' => t('Embed Code List'),
+      'field types' => array('gsa_ooyala_video_field'),
+    ),
+  );
+}
+
+/**
+* Implements hook_field_widget_form().
+* 
+* @param $form
+*   The form structure where widgets are being attached to.
+* @param $form_state
+*   An associative array containing the current state of the form.
+* @param $field
+*   The field structure.
+* @param $instance
+*   The field instance.
+* @param $langcode
+*   The language associated with $items.
+* @param $items
+*   Array of default values for this field.
+* @param $delta
+*   The order of this item in the array of subelements (0, 1, 2, etc).
+* @param $element
+*   A form element array containing basic properties for the widget.
+* 
+* @return
+*   The form elements for a single widget for this field.
+*/
+function gsa_ooyala_field_widget_form(&$form, &$form_state, $field, $instance, $langcode, $items, $delta, $element) {
+  $embed_code_value = isset($items[$delta]['embed_code']) ? $items[$delta]['embed_code'] : '';
+  $video_des_value = isset($items[$delta]['video_des']) ? $items[$delta]['video_des'] : '';
+
+  $element['#delta'] = $delta;
+
+  switch ($instance['widget']['type']) {
+    case 'gsa_ooyala_embed_code_list':
+      $element['embed_code'] = array(
+        '#type' => 'textfield',
+        '#default_value' => $embed_code_value,
+        '#size' => 40,
+        '#maxlength' => 40,
+        '#description' => t('Enter the embed code for an Ooyala video.')
+      );
+      
+      $element['video_title'] = array(
+	    '#value' => '',
+		'#type' => 'hidden',
+	  );
+	  $element['thumb_url'] = array(
+		'#value' => '',
+		'#type' => 'hidden',
+	  );
+	  
+	   $element['video_des'] = array(
+  		'#type' => 'textarea',
+  		'#description' => t('Enter a description for the Ooyala video (255 character limit).'),
+  		'#default_value' => $video_des_value,
+  		'#rows' => 5,
+  		'#cols' => 10,
+  		'#resizable' => TRUE,
+	  );
+	
+	
+      break;
+    
+  }
+
+  return $element;
+}
+
+/**
+* Implements hook_theme().
+*/
+function gsa_ooyala_theme() {
+  return array(
+    'gsa_ooyala_video_gallery'  => array(
+      'render element' => 'element',
+      'template' => 'gsa_ooyala_video_gallery',
+    ),
+  );
+}
+
+function template_preprocess_gsa_ooyala_video_gallery(&$vars) { 
+  $vars['first_embed_code']=$vars['ooyala_data'][0]['embed_code'];
+  $vars['first_video_des']=$vars['ooyala_data'][0]['video_des'];
+  $vars['width']='640px';
+  $vars['height']='360px';
+  $vars['player_id'] = drupal_html_id('ooyalaplayer-' . $vars['first_embed_code'] . '-' . 'test');
+  $settings = array(
+    'ooyalaSharedPlayer' => array(
+      $vars['player_id'],
+    ),
+  );
+
+  drupal_add_js($settings, array('type' => 'setting'));
+  drupal_add_js(drupal_get_path('module', 'ooyala') . "/ooyala_player.js");
+  drupal_add_js(drupal_get_path('module', 'ooyala') . "/ooyala_sharedplayer.js");  
+}
+
+
+/**
+* Implements hook_node_presave().
+* 
+* @param undefined $node
+*    The node object to be inserted or updated
+*/
+function gsa_ooyala_node_presave($node) {
+  $ooyala_api_path = drupal_get_path('module', 'ooyala') . '/includes/ooyala.api.inc';
+  require_once $ooyala_api_path;
+  if(isset($node->field_ooyala_video[$node->language]) && variable_get('ooyala_global_pcode',FALSE) && variable_get('ooyala_global_secret',FALSE)){
+  	foreach($node->field_ooyala_video[$node->language] as &$ooyala_field){
+  	  if($ooyala_field['embed_code'] != ''){
+	    $thumbnails = ooyala_api_fetch_thumbnails($ooyala_field['embed_code']);
+  	    $video = ooyala_api_video_load($ooyala_field['embed_code']);
+  	    $video_title = $video['name'];
+  	    $thumbnail_url=$thumbnails[0]->url;
+  	    $ooyala_field['thumb_url'] = $thumbnail_url;
+  	    $ooyala_field['video_title'] = $video_title;
+	  }
+    }
+  }
+}
+
+/**
+* Implements hook_og_user_access_alter().
+*/
+function gsa_ooyala_og_user_access_alter(&$perm, $context) {
+  if (empty($perm['view field_ooyala_video field'])) {
+    $perm['view field_ooyala_video field'] = TRUE;
+  }
+}
+
+/**
+* Implements hook_field_validate
+*/
+function gsa_ooyala_field_validate($entity_type, $entity, $field, $instance, $langcode, $items, &$errors) {
+  foreach ($items as $delta => $item) {
+    if(!empty($item['video_des']) && drupal_strlen($item['video_des']) > 255) {
+	  $errors[$field['field_name']][$langcode][$delta][] = array(
+          'error' => 'text_max_length',
+          'message' => t('Video Description can not be longer than 255 character'),
+        );	
+    }
+  }
+}
+
+function gsa_ooyala_form_alter(&$form, &$form_state, $form_id) {
+	if(isset($form['field_ooyala_video'])){
+		$form['field_ooyala_video']['und']['#description'] = '<div class="filter-help form-wrapper" ><p>'.$form['field_ooyala_video']['und']['#description'].'</p></div>';
+	}
+}

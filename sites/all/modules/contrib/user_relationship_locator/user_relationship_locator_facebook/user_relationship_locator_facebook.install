@@ -1,0 +1,34 @@
+<?php
+/**
+ * @file
+ * Installation functions for relationship facebook submodule.
+ */
+
+/**
+ * Implements hook_schema().
+ */
+
+function user_relationship_locator_facebook_schema() {
+  $schema['cache_user_relationship_locator_facebook'] = drupal_get_schema_unprocessed('system', 'cache');
+  $schema['cache_user_relationship_locator_facebook']['description'] = 'Cache table to temporarily store users friendslist data from Facebook.';
+  return $schema;
+}
+
+/**
+ * Implements hook_install.
+ */
+function user_relationship_locator_facebook_install() {
+  $users = array();
+  user_relationship_locator_network_create('facebook',$users);
+  drupal_set_message('Facebook network created for user relationship locator.');
+}
+
+/**
+ * Implements hook_uninstall.
+ */
+function user_relationship_locator_facebook_uninstall() {
+  db_delete('user_relationship_locator')
+    ->condition('netname', 'facebook')
+    ->execute();
+  drupal_set_message('Facebook network for user relationship locator deleted.');
+}

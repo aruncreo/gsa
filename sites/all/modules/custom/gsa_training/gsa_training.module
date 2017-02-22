@@ -1,0 +1,723 @@
+<?php
+
+include_once('gsa_training.features.inc');
+
+// Default location for courseware files
+define('GSA_TRAINING_DEFAULT_DIRECTORY', 'sites/default/libraries/courseware');
+
+/**
+ * @todo
+ *   checkout courseware
+ *   fix function naming conventions; need disparity between webinars 
+ *     on the filesystem, salesforce, and database
+ */
+
+/**
+ * Implements hook_menu()
+ */
+function gsa_training_menu() {
+  $items = array();
+  $items['webinar/getdata'] = array(
+    'page callback' => 'gsa_training_js_get_data',
+    'access arguments' => array('access gsa webinars'),
+    'delivery callback' => 'drupal_json_output',
+    'type' => MENU_CALLBACK,
+    'file' => 'gsa_training.pages.inc',
+  );
+  $items['webinar/savedata'] = array(
+    'page callback' => 'gsa_training_js_save_data',
+    'access arguments' => array('access gsa webinars'),
+    'delivery callback' => 'drupal_json_output',
+    'type' => MENU_CALLBACK,
+    'file' => 'gsa_training.pages.inc',
+  );
+  $items['admin/config/gsa-training'] = array(
+    'title' => 'GSA Training',
+    'description' => 'GSA Training and webinar system',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('gsa_training_admin_settings'),
+    'access arguments' => array('administer gsa webinars'),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'gsa_training.admin.inc',
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_permission()
+ */
+function gsa_training_permission() {
+  $permissions = array();
+  $permissions['access gsa webinars'] = array(
+    'title' => t('Access GSA webinars'),
+  );
+  $permissions['administer gsa webinars'] = array(
+    'title' => t('Administer GSA webinars'),
+  );
+  return $permissions;
+}
+
+/**
+ * Implements hook_node_view().
+ */
+function gsa_training_node_view($node, $view_mode, $langcode) {
+  // Attach the webinar when viewing the node
+  if ($node->type == 'gsa_webinar') {
+    gsa_training_attach_webinar($node);
+  }
+}
+
+/**
+ * Implements hook_gsa_event_save().
+ */
+function gsa_training_gsa_event_save($record, $type = NULL) {
+  if (strtolower($type) == 'webinar training') {
+    gsa_training_save_webinar($record);
+  }
+}
+
+/**
+ * Implements hook_gsa_event_delete().
+ */
+function gsa_training_gsa_event_delete($record, $type = NULL) {
+  if (strtolower($type) == 'webinar training') {
+    gsa_training_delete_webinar($record);
+  }
+}
+
+/**
+ * Implements hook_gsa_event_default_query_fields_alter()
+ */
+function gsa_training_gsa_event_default_query_fields_alter(&$fields) {
+  $fields[] = 'Send_to_Interact__c';
+  //$fields[] = 'Webinar_Number__c';
+}
+
+/**
+ * Get a user's course data for a given webinar
+ *
+ * @param $wid
+ *   The webinar ID
+ * @param $user
+ *   The user ID or object. If omitted, current user will be used
+ * @return
+ *   An object record of course data or NULL if there is none
+ */
+function gsa_training_get_user_course_data($wid, $user = NULL) {
+  if (!$user) {
+    global $user;
+  }
+  
+  if (!($uid = is_object($user) ? $user->uid : $user)) {
+    return NULL;
+  }
+  
+  $record = db_select('gsa_training_results', 'gtr')
+    ->fields('gtr')
+    ->condition('gtr.uid', $uid)
+    ->condition('gtr.wid', $wid)
+    ->execute()
+    ->fetchObject();
+  
+  if ($record) {
+    $record->data = unserialize($record->data);
+    return $record;
+  }
+  else {
+    return NULL;
+  }
+}
+
+/**
+ * Save a user's course data for a given webinar
+ *
+ * @param $wid
+ *   The webinar ID
+ * @param $data
+ *   An array of course progress data
+ * @param $user
+ *   The user ID or object. If omitted, current user will be used
+ * @return
+ *   TRUE if the save was executed successfully, otherwise, FALSE.
+ */
+function gsa_training_save_user_course_data($wid, $data, $user = NULL) {
+  if (!$user) {
+    global $user;
+  }
+  
+  if (!($uid = is_object($user) ? $user->uid : $user)) {
+    return NULL;
+  }
+  
+  // Check if we already have a record for this webinar
+  if (gsa_training_get_user_course_data($wid, $user)) {
+    // Update the record
+    db_update('gsa_training_results')
+      ->fields(array(
+        'data' => serialize($data),
+      ))
+      ->condition('uid', $uid)
+      ->condition('wid', $wid)
+      ->execute();
+  }
+  else {
+    // Save the data
+    db_insert('gsa_training_results')
+      ->fields(array(
+        'uid' => $uid,
+        'wid' => $wid,
+        'usfid' => 0,
+        'data' => serialize($data),
+      ))
+      ->execute();
+  }
+  
+  return TRUE;
+}
+
+/**
+ * Return the directory containing the webinars
+ */
+function gsa_training_get_webinar_path() {
+  return variable_get('gsa_training_webinar_path', GSA_TRAINING_DEFAULT_DIRECTORY);
+}
+
+/**
+ * Return all available webinars on the server
+ *
+ * @return
+ *   An array of webinar objects keyed by the webinar filename, containing
+ *   the filename, name, and base path
+ */
+function gsa_training_get_webinars() {
+  return gsa_training_scan_directory('index[0-9]{2}\.html');
+}
+
+/**
+ * Return a webinar from the server by ID
+ *
+ * @param $wid
+ *   The webinar ID
+ * @return
+ *   An object containing the filename, name, and base path, or NULL if
+ *   the webinar doesn't exist
+ */
+function gsa_training_get_webinar($wid) {
+  $regex = 'index' . str_pad($wid, 2, 0, STR_PAD_LEFT) . '\.html';
+  $webinar = gsa_training_scan_directory($regex);
+  return !empty($webinar) ? array_pop($webinar) : NULL;
+}
+
+/**
+ * Wrapper for file_scan_directory()
+ */
+function gsa_training_scan_directory($regex) {
+  $path = gsa_training_get_webinar_path();
+  $options = array(
+    'recurse' => TRUE,
+    'key' => 'filename',
+    'min_depth' => 0,
+  );
+  return file_scan_directory($path, "/{$regex}/", $options);
+}
+
+/**
+ * Query building and execution function to return webinar node data
+ * in an easy-to-use format
+ * 
+ * @param $args
+ *   An associative array of database conditions to use in the query.
+ * @return
+ *   A webinar data object, or array of, if more than one. If no records
+ *   are found, NULL will be returned.
+ */
+function gsa_training_webinar_query($args = array()) {
+  // Start the query
+  $query = db_select('node', 'n');
+
+  // Join the tables
+  $query->leftJoin('field_data_field_webinar_class_clp', 'wcp', 'wcp.entity_id = n.nid');
+  $query->leftJoin('field_data_field_webinar_class_sfid', 'wcs', 'wcs.entity_id = n.nid');
+  $query->leftJoin('field_data_field_webinar_id', 'wi', 'wi.entity_id = n.nid');
+  $query->leftJoin('field_data_field_webinar_sfid', 'ws', 'ws.entity_id = n.nid');
+    
+  // Add the fields
+  $query
+    ->fields('n', array('nid'))
+    ->fields('wcp', array('field_webinar_class_clp_value'))
+    ->fields('wcs', array('field_webinar_class_sfid_value'))
+    ->fields('wi', array('field_webinar_id_value'))
+    ->fields('ws', array('field_webinar_sfid_value'));
+    
+  // Limit to node entities of the type we need
+  $query->condition('n.type', 'gsa_webinar');
+  
+  // Iterate the conditions
+  foreach ($args as $key => $value) {
+    // Do some formatting
+    switch ($key) {
+      case 'wid':
+      case 'webinar_id':
+        $key = 'wi.field_webinar_id_value';
+        break;
+      case 'sfid':
+      case 'field_webinar_sfid_value';
+        $key = 'ws.field_webinar_sfid_value';
+        break;
+      case 'field_webinar_class_sfid_value';
+        $key = 'wcs.field_webinar_class_sfid_value';
+        break;
+      case 'field_webinar_class_clp_value';
+        $key = 'wcp.field_webinar_class_clp_value';
+        break;
+      case 'nid':
+        $key = 'n.nid';
+      default:
+        break;
+    }
+    
+    // Add the condition
+    $query->condition($key, $value);
+  }
+  
+  // Execute the query
+  $results = $query->execute();
+
+  // Build the return data
+  $objects = array();
+  foreach ($results as $result) {
+    $object = new stdClass;
+    $object->nid = $result->nid;
+    $object->sfid = $result->field_webinar_sfid_value;
+    $object->wid = $result->field_webinar_id_value;
+    $object->class_sfid = $result->field_webinar_class_sfid_value;
+    $object->class_clp = $result->field_webinar_class_clp_value;
+    $objects[$result->nid] = $object;
+  }
+
+  // If multiple items, return them all
+  if (count($objects) > 1) {
+    return $objects;
+  }
+  // If one item, return the object, not an array
+  else if (count($objects) == 1) {
+    return array_pop($objects);
+  }
+  // Else return nothing
+  else {
+    return NULL;
+  }
+}
+
+/**
+ * Save a webinar imported from Salesforce into a node
+ *
+ * @param $webinar
+ *   A Salesforce webinar Campaign object
+ */
+function gsa_training_save_webinar($record) {
+  // Check if we should sync this version
+  $skip = ($record->Send_to_Interact__c != 1) ? TRUE : FALSE;
+  if ($skip) {
+    watchdog('gsa_training', 'Skipped webinar !wid sync (!sfid)', array('!wid' => $record->Webinar_Number__c, '!sfid' => $record->Id));
+    return;
+  }
+  
+  // See if a node exists for this record
+  if ($webinar = gsa_training_webinar_query(array('sfid' => $record->Id))) {
+    // Load the node
+    $node = node_load($webinar->nid);
+    
+    // Delete the raw SF data in the events table
+    db_delete('gsa_events')->condition('sfid', $webinar->sfid)->execute();
+  }
+  else {
+    // Initialize the node
+    $node = new stdClass;
+    $node->type = 'gsa_webinar';
+    $node->language = LANGUAGE_NONE;
+    node_object_prepare($node);
+  }
+  
+  // Continue building the node
+  $webinar_id = NULL;
+  $node->title = isset($record->Published_Event_Title__c) ? htmlentities($record->Published_Event_Title__c) : htmlentities($record->Name);
+  $node->body = array(
+    LANGUAGE_NONE => array(
+      0 => array(
+        'value' => $record->Description,
+        'format' => 'full_html',
+      )
+    )
+  );
+  $node->revision = 0;
+  $node->format = 2;
+  $node->status = 0; // Default
+  gsa_event_attach_field_to_node($node, 'webinar_sfid', $record->Id, 0, NULL);
+  if (isset($record->CampaignClasses__r->records[0])) {
+    $webinar_id = $record->CampaignClasses__r->records[0]->Webinar_Number__c;
+    $node->status = $webinar_id ? 1 : 0; // Publish if WID is set
+    gsa_event_attach_field_to_node($node, 'webinar_id', $record->CampaignClasses__r->records[0]->Webinar_Number__c, 0, NULL);
+    gsa_event_attach_field_to_node($node, 'webinar_class_sfid', $record->CampaignClasses__r->records[0]->Id, 0, NULL);
+    gsa_event_attach_field_to_node($node, 'webinar_class_clp', $record->CampaignClasses__r->records[0]->CLP__c, 0, NULL);
+  }
+
+  // Save the node
+  node_save($node);
+  
+  // Store the raw SF data in the events table
+  db_insert('gsa_events')
+    ->fields(array(
+      'nid' => $node->nid,
+      'sfid' => $record->Id,
+      'data' => serialize($record),
+    ))
+    ->execute();
+  
+  watchdog('gsa_training', 'Synced webinar !wid sync (!sfid)', array('!wid' => $webinar_id, '!sfid' => $record->Id));
+
+  return $node;
+}
+
+/**
+ * Delete a webinar
+ *
+ * @param $record
+ *   The Salesforce record object
+ */
+function gsa_training_delete_webinar($record) {
+  if ($webinar = gsa_training_webinar_query(array('sfid' => $record->Id))) {
+    // Delete the node
+    if ($webinar->nid) {
+      node_delete($webinar->nid);
+    }
+    
+    // Delete the stored event data
+    db_delete('gsa_events')->condition('sfid', $record->Id)->execute();
+    
+    // Log the action
+    watchdog('gsa_training', 'Deleted webinar !wid (!sfid)', array('!wid' => $webinar->wid, '!sfid' => $webinar->sfid));
+  }
+  // @todo: Should we delete course progress data too?
+}
+
+/**
+ * Attach a webinar to a node
+ *
+ * @param $node
+ *   The node being altered
+ */
+function gsa_training_attach_webinar(&$node) {
+  global $user;
+  $module_path = drupal_get_path('module', 'gsa_training');
+  $course_path = gsa_training_get_webinar_path();
+  
+  // Start the attachment
+  $attachment = array(
+    '#type' => 'item',
+    '#prefix' => '<div class="webinar-message">',
+    '#suffix' => '</div>',
+    '#weight' => 100,
+  );
+  
+  // Load the webinar data from the database
+  $webinar_data = gsa_training_webinar_query(array('nid' => $node->nid));
+  
+  // Load the webinar from the server
+  $webinar = $webinar_data ? gsa_training_get_webinar($webinar_data->wid) : NULL;
+  
+  // We need a webinar ID and webinar
+  if (!$webinar_data->wid || !$webinar) {
+    $message = t('This webinar has not yet been configured');
+  }
+  // Access check
+  else if (!user_access('access gsa webinars')) {
+    $message = t('You are not permitted to launch webinars');
+  }
+  // Global Salesforce connection check
+  else if (variable_get('gsa_salesforce_enabled', 0) == 0) {
+    $message = t('The training records database is not available. Please return to the site at a later time to take this course.<br/>');
+  }
+
+  // **** DISABLED 2013-11-22 pending user profile UI cleanup ****
+  /*
+  // If we're syncing results with Salesforce, ensure all profile data is available
+  else if ($user->uid && variable_get('gsa_training_enable_salesforce', FALSE) && !gsa_salesforce_map_profile($user)) {
+    $message = t('All required fields of your user profile must be filled out before accessing a webinar. !link to edit your profile.', array('!link' => l(t('Click here'), "user/{$user->uid}/edit")));
+  }
+  */
+
+  else {
+    // Generate a launch link
+    $message = '<a href="#" id="launch-webinar-' . $webinar_data->wid . '" class="launch-webinar">';
+    $message .= t('Click here to launch the webinar');
+    $message .= '</a>';
+    
+    // Add a loading indicator
+    $message .= '<span class="webinar-loading">' . theme('image', array('path' => "{$module_path}/theme/images/throbber.gif", 'alt' => t('Loading...'), 'title' => t('Loading'))) . t('Loading webinar...') . '</span>';
+
+    // Attach the message
+    $attachment['#markup'] = $message;
+    
+    // Attach the JS
+    $attachment['#attached']['js'][] = "{$module_path}/gsa_training.js";
+    
+    // Add JS settings
+    $settings = array(
+      'training_path' => base_path() . $course_path . '/' . $webinar->filename,
+      'passing_score' => variable_get('gsa_training_passing_score', 0.7),
+    );
+    drupal_add_js(array('gsa_training' => $settings), 'setting');
+  }
+  
+  // Attach the CSS
+  $attachment['#attached']['css'][] = "{$module_path}/theme/gsa_training.css";
+  
+  // Create the sub-description
+  $description = '';
+  if (!$user->uid) {
+    $description .= t('WARNING: You are currently not logged into %sitename. Your course data will not be saved and credit will not be awarded for this course until you do so.', array('%sitename' => variable_get('site_name', t('this site')))) . '<br/>';
+    $description .= t('Please !login or !register.', array('!login' => l(t('login'), 'user'), '!register' => l(t('register for a free account'), 'user/register'))) . '<br/>';
+  }
+  $description .= t('Your browser must not be set to block popups');
+  
+  if ($webinar_alert = variable_get('gsa_training_webinar_alert', FALSE)) {
+    $description .= check_markup($webinar_alert, 'full_html');
+  }
+
+  // Attach the description
+  $attachment['#description'] = $description;
+  
+  
+  // Add to the node
+  $node->content['webinar'] = $attachment;
+}
+
+/**
+ * Initialize a user's course data
+ *
+ * @param &$record
+ *   The user's current record for the course
+ * @param $webinar
+ *   The webinar data
+ * @param $user
+ *   The user object
+ * @return
+ *   TRUE if all initialization operations were completed successfully
+ */
+function gsa_training_initialize_course_record(&$record, $webinar, $user) {
+  // Check if the user has a Salesforce Campaign Member Id for this course
+  if (!$record->usfid && variable_get('gsa_training_enable_salesforce', FALSE)) {
+    // Make sure this webinar as a sfid
+    if (!$webinar->sfid) {
+      return FALSE;
+    }
+    
+    // Try to load the user's Salesforce data
+    $sfUser = gsa_salesforce_user_sfid_get($user);
+    if (!$sfUser) {
+      // Attempt to fetch data from Salesforce directly
+      $sfData = gsa_salesforce_map_profile($user);
+      if ($sfData) {
+        if (!($sfUser = gsa_salesforce_user_sync($sfData, $user))) {
+          return FALSE;
+        }
+      }
+    }
+    
+    // Register with the webinar event in Salesforce
+    $op = t('Webinar !wid registration', array('!wid' => $webinar->wid));
+    $idType = $sfUser['type'] . "Id";
+  
+    // Create Salesforce object from the form
+    $sfObject = new stdClass;
+    $sfObject->CampaignId = $webinar->sfid;
+    $sfObject->$idType = $sfUser['sfid'];
+    $sfObject->Status = 'Responded/Registered';
+
+    // Connect to Salesforce
+    if (!($sf = gsa_salesforce_connect($op, $sfObject))) {
+      return FALSE;
+    }
+    
+    try {
+      // See if this user is already registered
+      $sfResult = $sf->client->query("SELECT Id FROM CampaignMember WHERE CampaignId = '" . $sfObject->CampaignId . "' AND " . $sfUser['type'] . "Id = '" . $sfUser['sfid'] . "'");
+      if (!count($sfResult->records)) {
+        // Add user as a registrant
+        $sfResponse = $sf->client->create(array($sfObject), 'CampaignMember');
+        // Extract the user's campaign member object ID
+        $usfid = $sfResponse[0]->id;
+      }
+      else {
+        // Extract the user's campaign member object ID
+        $usfid = $sfResult->records[0]->Id;
+      }
+    }
+    catch (Exception $e) {
+      gsa_salesforce_log_exception($e, $op, $sfObject);
+      return FALSE;
+    }
+      
+    // Fail if the SF transaction wasn't successful
+    if ($sfResponse && !gsa_salesforce_check_response($sfResponse, $op, $sfObject)) {
+      return FALSE;
+    }
+    
+    // Watchdog
+    watchdog('gsa_training', 'Registered !name for webinar !wid', array('!name' => $user->name, '!wid' => $webinar->wid));
+  }
+  
+  // See if we need to create a new record or update
+  if ($record) {
+    if ($usfid) {
+      // Alter the record
+      $record->usfid = $usfid;
+      // Update the usfid
+      db_update('gsa_training_results')
+        ->fields(array(
+          'usfid' => $record->usfid,
+        ))
+        ->condition('uid', $user->uid)
+        ->condition('wid', $webinar->wid)
+        ->execute();
+    }
+  }
+  else {
+    // Create a new record
+    db_insert('gsa_training_results')
+      ->fields(array(
+        'uid' => $user->uid,
+        'wid' => $webinar->wid,
+        'data' => serialize(array()),
+        'usfid' => $usfid,
+      ))
+      ->execute();
+  }
+  
+  return TRUE;
+}
+
+/**
+ * Analyze the course progress data and act accordingly
+ *
+ * @param &$webinar
+ *   A webinar object
+ * @param &$data
+ *   An array of course data transmitted via the webinar
+ * @param $user
+ *   The user responsible for the data
+ */
+function gsa_training_check_progress(&$webinar, &$data, $user) {
+  // See if the course has been completed
+  if (strtolower($data['completion_status']) == 'completed') {
+    // Calculate the score between 1-100
+    // **Treat non-numeric or null entries as "no exam" (100%)
+    $score = is_numeric($data['scaled_score']) ? number_format(($data['scaled_score'] * 100), 2)  : 100;
+    
+    // Assume no errors yet
+    $status = TRUE;
+    
+    if (variable_get('gsa_training_enable_salesforce', FALSE)) {
+      // Fetch the existing course progress data to get the user's sfid
+      $record = gsa_training_get_user_course_data($webinar->wid, $user);
+    
+      // Ensure we have the data we need
+      gsa_training_initialize_course_record($record, $webinar, $user);
+    
+      // Fail if we don't
+      if (!$record->usfid) {
+        $status = FALSE;
+      }
+      else {
+    
+        // Specify an operation for debugging
+        $op = t('Webinar !wid synchronization - course completion for !username (!uid)', array('!wid' => $webinar->wid, '!username' => $user->name, '!uid' => $user->uid));
+    
+        // Connect to Salesforce
+        if (!($sf = gsa_salesforce_connect($op, $sfObject))) {
+          $status = FALSE;
+        }
+        else {
+          try {
+            // Find the user's Class_Member__c Id if it exists
+            $sfResult = $sf->client->query("SELECT Id FROM Class_Member__c WHERE Campaign_Member_ID__c = '" . $record->usfid .  "' AND Classes_Taught__c = '" . $webinar->class_sfid . "'");
+            
+            // Build the Salesforce data object
+            $sfObject = new stdClass;
+            $sfObject->Training_Score__c = $score;
+
+            if (count($sfResult->records)) {
+              // Class_Member__c exists, update it
+              $sfObject->Id = $sfResult->records[0]->Id;
+              $sfResponse = $sf->client->update(array($sfObject), 'Class_Member__c');
+            } 
+            else {
+              // Create a class member for the user
+              $sfResult_cm = $sf->client->query("SELECT ContactId, LeadId FROM CampaignMember WHERE Id = '" . $record->usfid . "'");
+              if (count($sfResult->records)) {
+                $sfObject->ContactId = $sfResult_cm->records[0]->ContactId;
+                $sfObject->LeadId = $sfResult_cm->records[0]->LeadId;
+                $sfResponse = $sf->client->create(array($sfObject), 'Class_Member__c');
+              } 
+              else {
+                $status = FALSE;
+              }
+            }
+      
+            // Check response from Salesforce
+            $status = gsa_salesforce_check_response($sfResponse, $op, $sfObject);
+          }
+          catch (Exception $e) {
+            gsa_salesforce_log_exception($e, $op, $sfObject);
+            $status = FALSE;
+          }
+        }
+      }
+    }
+    
+    if ($status) {
+      if ($score >= variable_get('gsa_training_passing_score', 0)) {
+        gsa_training_send_confirmation_email($webinar, $user);
+      }
+      watchdog('gsa_training', 'Webinar !wid completed for !username (!uid)', array('!wid' => $webinar->wid, '!username' => $user->name, '!uid' => $user->uid));
+      return TRUE;
+    }
+    else {
+      watchdog('gsa_training', 'Unable to transmit webinar !wid completion for !username (!uid)', array('!wid' => $webinar->wid, '!username' => $user->name, '!uid' => $user->uid), array(), WATCHDOG_CRITICAL);
+      return FALSE;
+    }
+  }
+}
+
+/**
+ * Implements hook_mail().
+ */
+function gsa_training_mail($key, &$message, $params) {
+  $message['subject'] = $params['subject'];
+  $message['body'] = $params['message'];
+}
+
+/**
+ * Send a confirmation email to a user who has completed a webinar.
+ *
+ * @param $webinar
+ *   A webinar object.
+ *
+ * @param $user
+ *   The user who has completed a webinar.
+ */
+function gsa_training_send_confirmation_email($webinar, $user) {
+  if ($message = variable_get('gsa_training_confirmation_email_template', FALSE)) {
+    $webinar_node = node_load($webinar->nid);
+    $message = str_replace('!title', $webinar_node->title, $message);
+    drupal_mail(
+      'gsa_training',
+      'webinar_completion',
+      $user->mail,
+      language_default(),
+      array('subject' => t('Webinar confirmation from GSA Interact'), 'message' => array($message))
+    );
+  }
+}
+

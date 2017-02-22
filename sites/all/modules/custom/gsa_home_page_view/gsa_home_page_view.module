@@ -1,0 +1,160 @@
+<?php
+
+include_once 'gsa_home_page_view.features.inc';
+
+/**
+ * Implementation of hook_init().
+ */
+function gsa_home_page_view_init() {
+  $module_path = drupal_get_path('module', 'gsa_home_page_view');
+  drupal_add_css($module_path .'/gsa_home_page_view.css');  
+}
+
+/**
+* Implements hook_node_insert(). 
+* 
+* @param $node
+*  the node object to be inserted
+*/
+function gsa_home_page_view_node_insert($node){
+	$group = og_context();
+	$gid = $group->gid;
+	if(isset($gid)){
+		$group_node = $group->getEntity();
+		$featured_blog_flag = flag_get_flag('featured_blog_flag');
+		if($node->type == 'group' ){
+			if($node->field_group_content_featured_sta[$node->language][0]['value'] == 1){
+				$featured_blog_flag->flag('flag',$node->nid);
+			}
+			if($node->field_group_content_featured_sta[$node->language][0]['value'] == 0){
+				$featured_blog_flag->flag('unflag',$node->nid);
+			}
+		}
+
+		//Checking whether node to be update is a blog type and its a content of featured group
+		if($node->type == 'blog' && $node->field_site_featured[$node->language][0]['value'] == 1){
+			//Getting the flag for node featured content status
+			$featured_content_flag = flag_get_flag('featured_content_flag');
+		
+			//Unflagging all previously automatically flag featured content
+			$query = db_select('flag_content','fc');
+  			$query->innerJoin('field_data_group_audience','fdg','fc.content_id = fdg.entity_id');
+  			$query->innerJoin('node','n','n.nid = fdg.entity_id');
+  			$query->fields('fc');
+  			$query->fields('n');
+  			$query->condition('fc.fid', $featured_content_flag->fid);
+  			$query->condition('fdg.group_audience_gid',$gid);
+  			$query->orderBy("n.changed", "DESC");
+  			$result = $query->execute()->fetchAll();
+  		
+  			foreach($result as $row){
+  				//Eliminating it from the list of featured content
+  				$featured_content_flag->flag('unflag',$row->nid);
+  			}	
+		
+			//Setting the current node as featured
+			$featured_content_flag->flag('flag',$node->nid);
+		}
+		
+	}
+	
+}
+
+/**
+* Implemnts hook_gsa_group_page_group_menu_alter().
+* 
+* @param $menu
+* 	The menu array to be altered
+* @param $group
+*  Group in context
+* @param $node
+* 
+*/
+function gsa_home_page_view_gsa_group_page_group_menu_alter(&$menu,$group,$node){
+	$menu['administer']['items']['administer_featured_content'] = l(t('Administer Featured Content'), "administer-group-featured-content/{$group->gid}", array('query' =>  array("gids_{$group->bundle_name}" => array($group->gid))));
+}
+
+
+
+/**
+* Implements hook_node_update(). 
+* 
+* @param $node
+*  the node object to be updated
+*/
+function gsa_home_page_view_node_update($node){
+	$group = og_context();
+	$gid = $group->gid;
+	if(isset($gid)){
+		$group_node = $group->getEntity();
+		$featured_blog_flag = flag_get_flag('featured_blog_flag');
+		if($node->type == 'group' ){
+			if($node->field_group_content_featured_sta[$node->language][0]['value'] == 1){
+				$featured_blog_flag->flag('flag',$node->nid);
+			}
+			if($node->field_group_content_featured_sta[$node->language][0]['value'] == 0){
+				$featured_blog_flag->flag('unflag',$node->nid);
+			}
+		}
+
+		//Checking whether node to be update is a blog type and its a content of featured group
+		if($node->type == 'blog' && $node->field_site_featured[$node->language][0]['value'] == 1){
+			//Getting the flag for node featured content status
+			$featured_content_flag = flag_get_flag('featured_content_flag');
+		
+			//Unflagging all previously automatically flag featured content
+			$query = db_select('flag_content','fc');
+  			$query->innerJoin('field_data_group_audience','fdg','fc.content_id = fdg.entity_id');
+  			$query->innerJoin('node','n','n.nid = fdg.entity_id');
+  			$query->fields('fc');
+  			$query->fields('n');
+  			$query->condition('fc.fid', $featured_content_flag->fid);
+  			$query->condition('fdg.group_audience_gid',$gid);
+  			$query->orderBy("n.changed", "DESC");
+  			$result = $query->execute()->fetchAll();
+  		
+  			foreach($result as $row){
+  				//Eliminating it from the list of featured content
+  				$featured_content_flag->flag('unflag',$row->nid);
+  			}	
+		
+			//Setting the current node as featured
+			$featured_content_flag->flag('flag',$node->nid);
+		}
+		
+	}
+	
+}
+
+/**
+* Implements hook form alter
+*/
+function gsa_home_page_view_form_alter(&$form, &$form_state, $form_id) {
+	$group = og_context();
+	$gid = $group->gid;
+	if(isset($gid)){
+		$group_node = $group->getEntity();
+		$featured_blog_flag = flag_get_flag('featured_blog_flag');
+	
+		if($form['form_id']['#value'] == 'blog_node_form'){		
+			if($featured_blog_flag->is_flagged($group_node->nid)){
+				$form['field_site_featured'][$group_node->language]['#default_value'] = 1;
+			}else{
+				$form['field_site_featured']['#disabled'] = TRUE; 
+				$form['field_site_featured'][$group_node->language]['#default_value'] = 0;
+			}
+		
+		}
+	
+		if($form['form_id']['#value'] == 'group_node_form'){
+			if($featured_blog_flag->is_flagged($group_node->nid)){
+				$form['field_group_content_featured_sta'][$group_node->language]['#default_value'] = 1;
+			}else{
+				$form['field_group_content_featured_sta'][$group_node->language]['#default_value'] = 0;
+			}
+		}
+	
+	}
+}
+
+

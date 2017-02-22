@@ -1,0 +1,17 @@
+<?php
+// $Id: gsa_housekeeping.install 6 2012-06-19 23:25:16Z nikunjk $
+
+/**
+ * Implementation of hook_install()
+ **/
+function gsa_housekeeping_install() {
+
+}
+
+/**
+ * Implementation of hook_uninstall()
+ **/
+function gsa_housekeeping_uninstall() {
+  variable_del('gsa_housekeeping_killsessionhosts');
+}
+

@@ -1,0 +1,24 @@
+<?php
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function gsa_social_uninstall() {
+  variable_del('gsa_social_links');
+  variable_del('gsa_social_yahoo_app_id');
+}
+
+/**
+ * Convert old variables to correct namespace.
+ */
+function gsa_social_update_7001() {
+  if ($gsa_social_links = variable_get('gsa-social-links', FALSE)) {
+    variable_set('gsa_social_links', $gsa_social_links);
+    variable_del('gsa-social-links');
+  }
+  if ($gsa_social_yahoo_app_id = variable_get('yahoo_app_id', FALSE)) {
+    variable_set('gsa_social_yahoo_app_id', $gsa_social_yahoo_app_id);
+    variable_del('yahoo_app_id');
+  }
+  return array();
+}

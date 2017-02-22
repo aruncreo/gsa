@@ -1,0 +1,48 @@
+/* $Id: twocol_30_70.css 5 2012-06-19 15:14:44Z nikunjk $ */
+
+.twocol-30-70 .panel-panel {
+	display: block;
+	float: left;
+}
+
+.twocol-30-70 .panel-panel.panel-top,
+.twocol-30-70 .panel-panel.panel-bottom{
+	float: none;
+	width: 100%;
+	clear: both;
+}
+
+.twocol-30-70 .panel-panel.panel-top{
+	padding-bottom: 20px;
+}
+
+.twocol-30-70 .panel-panel.panel-top .inner .panel-pane:last-child {
+	margin-bottom: 0px;
+}
+
+.twocol-30-70 .panel-panel.panel-bottom {
+	padding-top: 20px;
+}
+
+.twocol-30-70 .panel-panel.panel-bottom .inner .panel-pane:first-child {
+	margin-top: 0px;
+}
+
+.twocol-30-70 .panel-panel.panel-col-first {
+	width: 28%;
+	margin: 0 2% 0 0; 
+	padding: 0;
+	overflow: hidden;
+}
+
+.twocol-30-70 .panel-panel.panel-col-last {
+	width: 68%;
+	margin: 0;
+	padding: 0 0 0 2%;
+	overflow: hidden;
+}
+
+.page-admin .twocol-30-70 .panel-panel.panel-col-first,
+.page-admin .twocol-30-70 .panel-panel.panel-col-last {
+	overflow: visible;
+}

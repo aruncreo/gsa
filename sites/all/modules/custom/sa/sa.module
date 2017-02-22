@@ -1,0 +1,204 @@
+<?php
+/*
+ * $Id: sa.module 90 2012-08-15 13:38:10Z nikunjk $
+*/
+
+
+function sa_init() {
+  drupal_add_js(drupal_get_path('module', 'sa') . '/sa.js');
+}
+
+function sa_menu() {
+  $items = array();
+  // Bookmarks page callback
+  $items['myprofile'] = array(
+      'title' => 'My Profile',
+      'description' => 'Manage your profile.',
+      'page callback' => 'sa_my_profile',
+      'access callback' => true,
+      'type' => MENU_CALLBACK,
+  );
+  // Bookmarks page callback
+  $items['bookmarks'] = array(
+      'title' => 'My Bookmarks',
+      'description' => 'Manage your own bookmarks.',
+      'page callback' => 'sa_my_bookmarks',
+      'access callback' => true,
+      'type' => MENU_CALLBACK,
+  );
+  // My group
+  $items['mygroup'] = array(
+      'title' => 'My Group',
+      'description' => 'Groups that are subscribe by you.',
+      'page callback' => 'sa_my_group',
+      'access callback' => true,
+      'type' => MENU_LOCAL_TASK,
+  );
+  // relationship page callback
+  $items['myrelationships'] = array(
+      'title' => 'My Friends',
+      'description' => "Manage your friend's relationships.",
+      'page callback' => 'sa_my_relationships',
+      'access callback' => true,
+      'type' => MENU_CALLBACK,
+  );
+  
+  return $items;
+}
+
+function sa_form_alter(&$form, $form_state, $form_id) {
+  switch($form['#id']) {
+    case 'views-exposed-form-blog-page':
+      $form['search'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Refine these search results'),
+      '#collapsible' => true,
+      '#collapsed' => true,
+      );
+
+      break;
+
+    case 'views-exposed-form-documents-page':
+      $form['search'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Refine these search results'),
+      '#collapsible' => true,
+      '#collapsed' => true,
+      );
+
+      break;
+
+  }
+}
+
+
+
+function sa_my_profile() {
+  if(user_is_logged_in()) {
+    global $user;
+    drupal_goto('user/'. $user->uid .'/view');
+  }
+  else {
+    drupal_goto('user');
+  }
+}
+
+
+
+function sa_my_bookmarks() {
+  if(user_is_logged_in()) {
+    global $user;
+    drupal_goto('user/'. $user->uid .'/bookmarks');
+  }
+  else {
+    drupal_goto('user');
+  }
+}
+
+/**
+ * Additional function to be used in development phase for debugging purpose
+ * @param array $value
+ * @param boolean $exit
+ */
+function sadebug($value, $exit = true) {
+  print '<pre>';
+  print_r($value);
+  print '</pre>';
+  if($exit) exit;
+}
+
+function og_all_groups_options() {
+  $groups = array();
+  $gids = og_get_all_group();
+  foreach($gids as $gid) {
+    $groups[$gid] = og_label($gid);
+  }
+  return $groups;
+}
+
+function og_save_subscription($group_node_id, $user_id) {
+  $user = user_load($user_id);
+  $node = new stdClass();
+  // Get the group ID from the node ID
+  $group = og_get_group("node", $group_node_id);
+  // Load the user we want to add to the group (ID #2 was my test user)
+  $account = clone $user;
+  // Add the user to the group
+  og_group($group->gid, array(
+      "entity type"       => "user",
+      "entity"        => $account,
+      "membership type"   => OG_MEMBERSHIP_TYPE_DEFAULT,
+  ));
+  // Changes the users role in the group (1 = non-member, 2 = member, 3 = administrator member)
+  og_role_grant($group->gid, $account->uid, 3);
+}
+
+
+/**
+ * Menu callback for Watch a product form page [user/%user/mygroup].
+ */
+function sa_my_group() {
+  global $user;
+  if(user_is_logged_in()){
+    $groups = og_get_groups_by_user($user);
+    foreach($groups as $key){
+      $group = og_load($key);
+      $label[] = l($group->label, 'node/'. $group->etid);
+    }
+    $group_label = implode('<br>', $label);
+
+  }
+  if(user_is_anonymous()){
+    drupal_goto('node');
+  }
+  return $group_label;
+}
+
+
+function node_get_types() {
+  return $types = _node_types_build()->types;
+}
+
+// returns TRUE if node type can be posted into a group.
+function og_is_group_post_type($type) {
+  $usage = variable_get('og_content_type_usage_'. $type, 'omitted');
+  return strpos($usage, 'group_post') !== FALSE ? TRUE : FALSE;
+}
+
+
+function sa_my_relationships() {
+  if(user_is_logged_in()) {
+    global $user;
+    drupal_goto('user/'. $user->uid .'/relationships');
+  }
+  else {
+    drupal_goto('user');
+  }
+}
+
+function sa_get_groups($data) {
+  $account = user_load($data->uid);
+  $groups = og_get_groups_by_user($account);
+  foreach($groups as $key){
+    $group = og_load($key);
+    $label[] = l($group->label, 'node/'. $group->etid);
+  }
+  print $group_label = implode(',', $label);
+}
+
+
+function og_get_group_count($gid, $entity_type = 'user') {
+  $query = new EntityFieldQuery();
+  
+  $result = $query
+  ->entityCondition('entity_type', 'og_membership')
+  ->propertyCondition('entity_type', $entity_type, '=')
+  ->propertyCondition('gid', $gid, '=')
+  ->propertyCondition('state', OG_STATE_ACTIVE, '=')
+  ->count()
+  ->execute();
+  
+  return $result;
+}
+
+

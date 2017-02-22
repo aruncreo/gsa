@@ -1,0 +1,29 @@
+<?php
+
+/**
+ * Implementation of hook_og_group_defaultroles_conditions().
+ */
+function ogdr_test_og_group_defaultroles_conditions() {
+  $conditions = array(
+    'ogdr_test_user_gsa_email' => 'User has GSA email address',
+    'ogdr_test_user_govmil_email' => 'User has .gov/.mil email address',
+  );
+  return $conditions;
+}
+
+/**
+ * Test condition function.
+ */
+function ogdr_test_user_gsa_email($gid) {
+  global $user;
+  return FALSE;
+}
+
+/**
+ * Test condition function.
+ */
+function ogdr_test_user_govmil_email($gid) {
+  global $user;
+  return FALSE;
+}
+

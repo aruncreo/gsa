@@ -1,0 +1,10 @@
+name = GSA My Groups
+description = Block that give user's groups.
+package = GSA
+version = 7.x-1.x
+core = 7.x
+; Information added by drupal.org packaging script on 2012-04-28
+version = "7.x-1.3"
+core = "7.x"
+project = "gsa_my_groups"
+

@@ -1,0 +1,36 @@
+<?php
+
+
+/**
+ * Disable Vertical tabs on a form with simply changing the value of $form['additional_settings']['#type']
+ *
+ */
+function form_disable_vertical_tabs(&$form){
+  // originally $form['additional_settings']['#type'] equals to 'vertical_tabs'
+  if(isset($form['additional_settings']['#type']) && ($form['additional_settings']['#type'] === 'vertical_tabs')){
+    $form['additional_settings']['#access'] = FALSE;
+  }
+}
+
+
+/**
+ * Implements hook_form_alter().
+ */
+function hidetabs_form_alter(&$form, &$form_state, $form_id) {
+
+  global $user;
+  $is_administrator = in_array('site administrator', array_values($user->roles));
+  $is_admin = in_array('site admin', array_values($user->roles));
+  $is_community_manager = in_array('community manager', array_values($user->roles));
+
+  if($form_id == 'discussion_node_form' || $form_id == 'ideas_node_form'){
+    // if $user does NOT have the administrator role.
+    if (!($is_administrator || $is_admin || $is_community_manager)) {
+      // disable vertical tabs for this form
+      form_disable_vertical_tabs($form);
+    }
+  }
+  if($form_id == 'ideas_node_form'){
+    $form['field_topic']['#disabled'] = TRUE;
+  }
+}

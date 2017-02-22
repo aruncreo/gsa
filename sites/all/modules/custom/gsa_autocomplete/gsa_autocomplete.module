@@ -1,0 +1,318 @@
+<?php
+
+/**
+* Implements hook_menu
+*/
+function gsa_autocomplete_menu(){  
+
+	$items['user/autocomplete/groups/%'] = array(
+		'title' => 'User autocomplete',
+		'page callback' => 'gsa_autocomplete_user_autocomplete_group',
+		'page arguments'=>array(1),
+		'access callback' => 'user_access',
+		'access arguments' => array('access user profiles'),
+		'type' => MENU_CALLBACK,
+	);
+	return $items;
+}
+
+/**
+* Implements hook_menu_alter
+*/
+function gsa_autocomplete_menu_alter(&$items){
+
+	$items['group/%/%/admin/people']['page arguments'] = array('gsa_autocomplete_user_admin_account', 1, 2);
+}
+
+
+function gsa_autocomplete_user_autocomplete_group($userString='',$arg=''){
+	
+	$matches = array();
+	
+	$paramArray=explode('/',$_GET['q']);
+	$etid=$paramArray[3];
+	$group = og_get_group('node', $etid);
+
+	if($userString){
+
+		$sql="SELECT u.name AS name
+		FROM 
+		{users} u
+		INNER JOIN {og_membership} m ON u.uid=m.etid
+		WHERE  (u.name LIKE '".$paramArray[4]."%') AND m.gid='".$group->gid."' ";
+
+
+		$result=db_query($sql);
+		while($record = $result->fetchAssoc()){
+			$name=$record['name'];
+			$matches[$name] = check_plain($record['name']);
+	 
+
+		}
+	}
+	drupal_json_output($matches);
+
+}
+
+/**
+* Implements hook_form_alter
+*/
+function gsa_autocomplete_form_alter(&$form, &$form_state, $form_id){
+
+
+	if($form_id=='og_ui_user_admin_account' || $form_id=='gsa_autocomplete_user_admin_account'){
+		$param=$_GET['q'];
+		$paramArray=explode('/',$param);
+		$gid = $form['group']['#value']->gid;
+		$og_role_list = og_roles($gid);
+		$og_roles = array();
+		$og_roles[0] = 'Select a role';
+		foreach($og_role_list as $og_rid=>$role){
+			//blocking non-member and member roles from the role list
+			if(!in_array($role, array(OG_ANONYMOUS_ROLE, OG_AUTHENTICATED_ROLE))){
+				$og_roles[$og_rid] = $role;
+			}
+		}
+		asort($og_roles);
+
+		$form['user_name_field'] = array(
+			'#type' => 'fieldset',
+			'#prefix'=>'<div class="container-inline">',
+			'#suffix'=>'</div>',
+			'user_name'=>array(
+				'#type'=>'textfield',
+				'#title' => t('USERNAME'),
+				'#size' => 30,
+				'#maxlength' => 60,
+				'#autocomplete_path' => 'user/autocomplete/groups/'.$paramArray[2].'',
+				'#default_value' => $author,
+			),
+			'role_list'=>array(
+				'#type'=>'select',
+				'#title' => t('Role'),
+				'#options' => $og_roles,
+				'#multiple' => false,
+				'#default_value' => isset($_GET['rlist'])?$_GET['rlist']:0,
+			),
+			'submit'=>array(
+				'#type'=>'submit',
+				'#value'=>'Search',
+			),
+			
+			'reset_link' => array(
+			  '#type' => 'link',
+			  '#title' => t(' Reset'),
+			  '#href' => $GLOBALS['base_url'].'/group/node/'.$paramArray[2].'/admin/people',
+			),
+	
+			'#weight' => 0,
+		);
+		
+		$form['options']['#weight']=-1;
+		$tempUserName=$form['#validate'][0];
+		$form['#validate'][0]='gsa_autocomplete_search_user';
+		$form['#validate'][1]=$tempUserName;
+	
+	
+	}
+}
+
+function gsa_autocomplete_search_user($form, &$form_state){
+	if($form_state['values']['user_name'] != NULL && $form_state['values']['role_list'] == 0){
+		drupal_goto($GLOBALS['base_url'].'/'.$_GET['q'].'?uname='.$form_state['values']['user_name']);
+	}
+	if($form_state['values']['role_list'] !=0 && $form_state['values']['user_name'] == NULL){
+		drupal_goto($GLOBALS['base_url'].'/'.$_GET['q'].'?rlist='.$form_state['values']['role_list']);
+	}
+		if($form_state['values']['role_list'] !=0 && $form_state['values']['user_name'] != NULL){
+		drupal_goto($GLOBALS['base_url'].'/'.$_GET['q'].'?rlist='.$form_state['values']['role_list'].'&uname='.$form_state['values']['user_name']);
+	}
+}
+
+
+
+
+/**
+*  for search user in people page
+*/
+function gsa_autocomplete_user_admin_account($form, $form_state, $entity_type, $etid){
+	og_set_breadcrumb($entity_type, $etid, array(l(t('Group'), "$entity_type/$etid/group")));
+	$group = og_get_group($entity_type, $etid);
+	// Get the group real entity, so we can check the user ID of the entity.
+	$entity = $group->getEntity();
+
+	$form['group'] = array('#type' => 'value', '#value' => $group);
+	$form['options'] = array(
+		'#type' => 'fieldset',
+		'#title' => t('Update options'),
+		'#prefix' => '<div class="container-inline">',
+		'#suffix' => '</div>',
+	);
+	$options = array();
+	foreach(module_implements('og_user_operations') as $module){
+		$result = call_user_func($module . '_og_user_operations', array(), array('group' => $group));
+		foreach($result as $operation => $array){
+			$options[$operation] = $array['label'];
+		}
+	}
+
+	$form['options']['operation'] = array(
+		'#type' => 'select',
+		'#options' => $options,
+		'#default_value' => 'unblock',
+	);
+
+	$options = array();
+	$form['options']['submit'] = array(
+		'#type' => 'submit',
+		'#value' => t('Update'),
+	);
+
+	$states = og_group_content_states();
+	$roles = og_roles($group->gid);
+	$header = array(
+		'username' => array('data' => t('Username'), 'field' => 'u.name'),
+		'state' => array('data' => t('State'), 'field' => 'ogm.state'),
+		'roles' => array('data' => t('Roles')),
+		'member_for' => array('data' => t('Member for'), 'field' => 'ogm.created', 'sort' => 'desc'),
+	);
+  
+	/**/
+	
+	$query = db_select('users', 'u');
+	$query->innerJoin('og_membership', 'ogm', 'u.uid = ogm.etid');
+	$query->condition('ogm.gid', $group->gid, '=')->condition('ogm.entity_type', 'user', '=');
+	
+	if(isset($_GET['uname']) && !isset($_GET['rlist'])){
+		$query->condition('u.name', $_GET['uname'], '=');
+		$query
+		->fields('u', array('uid', 'name'))
+		->fields('ogm', array('state', 'created'));	
+	}elseif(!isset($_GET['uname']) && isset($_GET['rlist'])){
+		$query->innerJoin('og_users_roles', 'ogr', 'u.uid = ogr.uid');
+		$query->condition('ogr.rid', $_GET['rlist'], '=')->condition('ogr.gid', $group->gid, '=');
+		$count_query = clone $query;
+		$count_query->addExpression('COUNT(u.uid)'); 
+		$query = $query->extend('PagerDefault')->extend('TableSort');
+		$query
+		->fields('u', array('uid', 'name'))
+		->fields('ogm', array('state', 'created'))
+		->limit(25)
+		->orderByHeader($header)
+		->setCountQuery($count_query);
+		$query
+		->fields('u', array('uid', 'name'))
+		->fields('ogm', array('state', 'created'));	
+	}elseif(isset($_GET['uname']) && isset($_GET['rlist'])){
+		$query->innerJoin('og_users_roles', 'ogr', 'u.uid = ogr.uid');
+		$query->condition('ogr.rid', $_GET['rlist'], '=')->condition('ogr.gid', $group->gid, '=')->condition('u.name', $_GET['uname'], '=');
+		$query
+		->fields('u', array('uid', 'name'))
+		->fields('ogm', array('state', 'created'));	
+	}
+	else{
+		$count_query = clone $query;
+		$count_query->addExpression('COUNT(u.uid)'); 
+		$query = $query->extend('PagerDefault')->extend('TableSort');
+		$query
+		->fields('u', array('uid', 'name'))
+		->fields('ogm', array('state', 'created'))
+		->limit(25)
+		->orderByHeader($header)
+		->setCountQuery($count_query);
+	}
+		 
+		$result = $query->execute();
+	foreach($result as $row){
+		// Note that we allow editing of the group manager, but will make sure on
+		// submit that they can not be removed from group.
+		$users_roles = array();
+		foreach(og_get_user_roles($group->gid, $row->uid) as $rid){
+			if(!in_array($roles[$rid], array(OG_ANONYMOUS_ROLE, OG_AUTHENTICATED_ROLE))){
+				// Show the user's roles, except of the authenticated role, that all
+				// group members have, or anonymous that blocked members have.
+				$users_roles[] = $roles[$rid];
+			}
+		}
+		asort($users_roles);
+
+		$account = user_load($row->uid);
+		$options[$account->uid] = array(
+			'username' => theme('username', array('account' => $account)),
+			'state' =>  $states[$row->state],
+			'roles' => theme('item_list', array('items' => $users_roles)),
+			'member_for' => format_interval(REQUEST_TIME - $row->created),
+		);
+	}
+
+	// Add group manager details.
+	$form['group_manager'] = array(
+		'#type' => 'item',
+		'#title' => t('Group manager'),
+		'#markup' => theme('username', array('account' => $entity)),
+	);
+
+	$form['accounts'] = array(
+		'#type' => 'tableselect',
+		'#header' => $header,
+		'#options' => $options,
+		'#empty' => !empty($entity->uid) ? t('No people available apart of the group manager.') : t('No people available.'),
+	);
+
+	$form['pager'] = array('#markup' => theme('pager', array('tags' => NULL)));
+
+	return $form;
+}
+
+
+
+
+function gsa_autocomplete_user_admin_account_validate($form, &$form_state){
+	$form_state['values']['accounts'] = array_filter($form_state['values']['accounts']);
+	if(count($form_state['values']['accounts']) == 0){
+		form_set_error('', t('No users selected.'));
+	}
+}
+
+/**
+* Submit the user administration update form.
+*/
+function gsa_autocomplete_user_admin_account_submit($form, &$form_state){
+	$group = $form_state['values']['group'];
+
+	$operations = module_invoke_all('og_user_operations', $form, $form_state + array('group' => $group));
+	$operation = $operations[$form_state['values']['operation']];
+	// Filter out unchecked accounts.
+	$accounts = array_filter($form_state['values']['accounts']);
+
+	// If the operation is unblock, block or deny, we make sure the group manager
+	// isn't being processed, if they were selected.
+	if(in_array($form_state['values']['operation'], array('unblock', 'deny', 'block'))){
+		// Get the entity from group.
+		$entity = $group->getEntity();
+
+		if(!empty($entity->uid) && in_array($entity->uid, $accounts)){
+			// Remove from the accounts array, and give a message.
+			unset($accounts[$entity->uid]);
+			drupal_set_message('This update can not be used on the group manager.');
+		}
+	}
+
+	if($accounts && $function = $operation['callback']){
+		// Add in callback arguments if present.
+		if(isset($operation['callback arguments'])){
+			$args = array_merge(array($accounts), $operation['callback arguments']);
+		}
+		else{
+			$args = array($accounts);
+		}
+		call_user_func_array($function, array('gid' => $group->gid) + $args);
+
+		drupal_set_message(t('The update has been performed.'));
+	}
+}
+
+
+
+
+

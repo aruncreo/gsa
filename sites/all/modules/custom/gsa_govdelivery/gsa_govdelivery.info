@@ -1,0 +1,7 @@
+name = GSA GovDelivery
+description = Provides a mechanism for dashboard content subscription to users
+core = 7.x
+package = GSA
+dependencies[] = flag
+
+features[flag][] = gsa_govdelivery_subscription

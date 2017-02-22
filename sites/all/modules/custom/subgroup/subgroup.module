@@ -1,0 +1,55 @@
+<?php
+
+
+/**
+* Implements hook_og_membership_insert().
+* @param  $og_membership
+*   The membership object
+*/
+function subgroup_form_alter(&$form, $form_state, $form_id) {	
+	if($form_id == 'group_node_form'){
+		foreach($form['group_audience']['und']['#options'] as &$group_group ){
+			foreach($group_group as $key=>$val){
+					$sub_group = og_load($key);	
+					if(!empty($sub_group->entity->group_audience)){
+					
+					unset($group_group[$key]);
+					
+					}
+					
+			}
+		}
+	}
+	
+	 if (isset($form_id) && $form_id == 'og_ui_confirm_subscribe') {
+        $form['#submit'][] = 'subgroup_og_ui_confirm_subscribe_submit_handler';
+    }
+}
+
+// subscribe user to parent group after subscription of a subgroup
+function subgroup_og_ui_confirm_subscribe_submit_handler($form, &$form_state) {
+
+    $gid = $form_state['values']['group']->gid;
+    $uid = $form_state['values']['account']->uid;
+
+    $parent_group = og_load($gid);
+    $account = user_load($uid);
+    
+	$values = array(
+        'entity_type' => 'user',
+        'entity' => $account,
+        'state' => OG_STATE_ACTIVE,
+       );
+	   
+	if(!empty($parent_group->entity->group_audience['und'])){
+		foreach($parent_group->entity->group_audience['und'] as $parent_group_data){
+			
+			if($parent_group_data['gid']>0) {		
+			    // subscribe user to parent group
+				og_group($parent_group_data['gid'], $values);	
+			}	
+		}
+	}
+    return $form;
+}
+

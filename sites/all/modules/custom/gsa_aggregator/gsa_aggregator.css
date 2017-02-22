@@ -1,0 +1,10 @@
+/* $Id$ *******************************************/
+@CHARSET "ISO-8859-1";
+
+#gsa-aggregator-form-feed .form-item-category{
+  display:none;
+}
+
+#gsa-aggregator-form-feed  #edit-actions .gs-button{
+  margin: 5px !important;
+}

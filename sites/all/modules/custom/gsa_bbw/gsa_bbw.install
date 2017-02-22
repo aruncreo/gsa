@@ -1,0 +1,10 @@
+<?php
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function gsa_bbw_uninstall() {
+  variable_del('gsa_bbw_group');
+  variable_del('gsa_bbw_webform');
+  variable_del('gsa_bbw_delete_webform');
+}

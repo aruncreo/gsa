@@ -1,0 +1,188 @@
+<?php
+
+/**
+ * Implements hook_menu().
+ */
+function gsa_og_perms_menu() {
+  $items = array();
+  
+  $items['admin/config/gsa-og-perms'] = array(
+    'title' => t('GSA OG Permissions Extras'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('gsa_og_perms_admin_form'),
+    'access arguments' => array('administer gsa'),
+  );
+  
+  return $items;
+}
+
+/**
+ * Implements hook_og_role_grant().
+ *
+ * Assign sitewide roles when users are granted group roles.
+ */
+function gsa_og_perms_og_role_grant($gid, $uid, $rid) {
+
+  // Get the OG->core role mapping, keyed by IDs of group default roles.
+  // Custom roles defined by a group are not supported.
+  if (!$map = variable_get('gsa_og_perms_og_core_rolemap', FALSE)) {
+    return;
+  }
+
+  $og_default_roles = og_roles(0);
+  $og_roles = og_roles($gid);
+  $core_roles = user_roles(TRUE);
+  
+  // Get the name of the group role being granted.
+  $og_role_name = $og_roles[$rid];
+
+  // If the name matches a default group role...
+  if ($og_default_role_key = array_search($og_role_name, $og_default_roles)) {
+
+    // If this role is mapped, add mapped role(s) to the user
+    if (isset($map[$og_role_key])) {
+      $account = user_load($uid);
+      foreach ($map[$og_default_role_key] as $array_key => $core_role_key) {
+        if ($core_role_key == $array_key) {
+          $account->roles[$core_role_key] = $core_roles[$core_role_key];
+        }
+      }
+      unset($account->pass);
+      user_save($account);
+    }
+  }  
+}
+
+/**
+ * Implements hook_entity_presave().
+ *
+ * Assign group roles upon membership creation per sitewide roles.
+ */
+function gsa_og_perms_entity_presave($entity, $type) {
+  if ($type == 'og_membership' && $entity->entity_type == 'user') {
+  
+    // Get the core->OG role mapping, keyed by IDs of core roles.
+    if (!$map = variable_get('gsa_og_perms_core_og_rolemap', FALSE)) {
+      return;
+    }
+
+    $og_default_roles = og_roles(0);
+    $og_roles = og_roles($entity->gid);
+  
+    $account = user_load($entity->etid);
+  
+    foreach ($account->roles as $core_role_key => $core_role) {
+      if (isset($map[$core_role_key])) {
+        foreach ($map[$core_role_key] as $array_key => $og_default_role_key) {
+          if ($og_default_role_key == $array_key) {
+            $og_default_role_name = $og_default_roles[$array_key];
+            if ($og_role_key = array_search($og_default_role_name, $og_roles)) {
+              gsa_og_perms_grant_og_role($entity->gid, $entity->etid, $og_role_key);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Custom function to grant a group role.
+ *
+ * Calling og_role_grant() directly could produce unintended results 
+ * because we use its hook to set sitewide roles.
+ */
+function gsa_og_perms_grant_og_role($gid, $uid, $rid) {
+  // Get the existing user roles.
+  $user_roles = og_get_user_roles($gid, $uid);
+  if (!in_array($rid, $user_roles)) {
+    $role = new stdClass();
+    $role->uid = $uid;
+    $role->rid = $rid;
+    $role->gid = $gid; 
+
+    drupal_write_record('og_users_roles', $role);
+  }
+}
+
+/**
+ * Form builder for admin settings.
+ *
+ * @todo: Format as tables.
+ */
+function gsa_og_perms_admin_form() {
+  $form = array();
+  
+  $og_core_map = variable_get('gsa_og_perms_og_core_rolemap', array());
+  $core_og_map = variable_get('gsa_og_perms_core_og_rolemap', array());
+
+  $form['#tree'] = TRUE;
+  
+  $form['og_core_mappings'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Group->core role auto assignments'),
+    '#collapsible' => TRUE,
+    '#collapsed' => TRUE,
+  );
+  
+  $form['og_core_mappings']['markup'] = array(
+    '#markup' => t('Assign the following sitewide roles when group roles are granted.'),
+  );
+  
+  foreach (og_roles(0) as $og_role_key => $og_role_name) {
+    $form['og_core_mappings'][$og_role_key] = array(
+      '#type' => 'checkboxes',
+      '#title' => t('Group role: !role', array('!role' => check_plain($og_role_name))),
+      '#options' => user_roles(TRUE),
+      '#default_value' => $og_core_map[$og_role_key],
+    );
+  }
+  
+  $form['core_og_mappings'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Core->group role auto assignments'),
+    '#collapsible' => TRUE,
+    '#collapsed' => TRUE,
+  );
+
+  $form['core_og_mappings']['markup'] = array(
+    '#markup' => t('Grant the following group roles when users with sitewide roles join groups.'),
+  );
+  
+  foreach (user_roles(TRUE) as $core_role_key => $core_role_name) {
+    $form['core_og_mappings'][$core_role_key] = array(
+      '#type' => 'checkboxes',
+      '#title' => t('Sitewide role: !role', array('!role' => check_plain($core_role_name))),
+      '#options' => og_roles(0),
+      '#default_value' => $core_og_map[$core_role_key],
+    );
+  }
+  
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Save settings'),
+  );
+  
+  return $form;
+}
+
+/**
+ * Submit handler for admin settings form.
+ */
+function gsa_og_perms_admin_form_submit($form, &$form_state) {
+
+  $og_core_rolemap = array();
+  foreach ($form_state['values']['og_core_mappings'] as $og_role_key => $mapping) {
+    $og_core_rolemap[$og_role_key] = $mapping;
+  }
+  variable_set('gsa_og_perms_og_core_rolemap', $og_core_rolemap);
+  
+  $core_og_rolemap = array();
+  foreach ($form_state['values']['core_og_mappings'] as $core_role_key => $mapping) {
+    $core_og_rolemap[$core_role_key] = $mapping;
+  }
+  variable_set('gsa_og_perms_core_og_rolemap', $core_og_rolemap);
+  
+  drupal_set_message(t('The settings have been saved.'));
+
+}

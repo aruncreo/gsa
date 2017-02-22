@@ -1,0 +1,287 @@
+<?php
+/**
+ * @author
+ * Mark Ferree http://drupal.org/user/76245
+ *
+ * @file
+ * User Relationships Limits module. Provides ability to limit the number of relationships by role
+ */
+
+/**
+ * hook_user_relationships_presave()
+ */
+
+function user_relationship_limits_user_relationships_presave($relationship) {
+  //below works except during accept, where we don't have the full user object
+  $requester_uid = $relationship->requester->uid;
+  $requester = user_load($requester_uid);
+  $requester_limit = user_relationship_limits_user_limit($relationship->rtid, $requester);
+  $requester_count = user_relationship_limits_relationship_count($relationship->rtid, $requester->uid);
+
+  //check the requestee to make sure they have an available slot as well
+  $requestee_uid = $relationship->requestee->uid;
+  $requestee = user_load($requestee_uid);
+
+  $requestee_limit = user_relationship_limits_user_limit($relationship->rtid, $requestee);
+  $requestee_count = user_relationship_limits_relationship_count($relationship->rtid, $requestee->uid);
+
+  if (($requester_limit != 0) & ($requester_count >= $requester_limit)) {
+    //we can't submit any more requests, post an error message and keep the form from submitting
+    //check if the error is being triggered on acceptance and display a different warning
+    global $user;
+    if ($user->uid == $requestee->uid) {
+      form_set_error('error', t('That user has no more available relationships of that type'));
+    }
+    else {
+      form_set_error('error', t('You have no more available relationships of that type'));
+    }
+    //abort the request
+    drupal_goto(drupal_get_destination());
+  }
+  elseif (($requestee_limit != 0) & ($requestee_count >= $requestee_limit)) {
+    //we can't submit the request
+    form_set_error('error', t('That user has no more available relationships of that type'));
+    //abort the request
+    drupal_goto(drupal_get_destination());
+  }
+}
+
+/**
+ * find the current limit for the given relationship type and role id
+ */
+function user_relationship_limits_role_limit($rtid, $rid) {
+  $sql = "SELECT role_limit FROM {user_relationship_limits} WHERE rtid = :rtid AND rid = :rid";
+  $role_limit = db_query($sql, array(':rtid' => $rtid, ':rid' => $rid))->fetchField();
+  return $role_limit;
+}
+
+/**
+ * find the current number of a given relationship for a given user
+ */
+function user_relationship_limits_relationship_count($rtid, $uid) {
+  //find current count for this relationships (requested and accepted)
+  $pending = variable_get('user_relationship_limits_pending', 1);
+  if ($pending == 1) {
+    $sql = "SELECT COUNT(*) FROM {user_relationships} WHERE requester_id = :uid AND rtid = :rtid";
+    $rel_number = db_query($sql, array(':uid' => $uid, ':rtid' => $rtid))->fetchField();
+  }
+  else {
+    $sql = "SELECT COUNT(*) FROM {user_relationships} WHERE requester_id = :uid AND rtid = :rtid AND approved = 1";
+    $rel_number = db_query($sql, array(':uid' => $uid, ':rtid' => $rtid))->fetchField();
+  }
+  return $rel_number;
+}
+
+/**
+ * find the number of available relationships for a given user and relationship id
+ */
+function user_relationship_limits_user_limit($rtid, $user) {
+  //default to no restrictions if we don't find anything
+  $user_limit = 0;
+  //Go through each role of the user, find the max allowed limit
+  foreach ($user->roles as $key => $value) {
+    //Find role limit and add it to our array
+    $user_role_limit = user_relationship_limits_role_limit($rtid, $key);
+    //if there's no value for any role, no restrictions and there's nothing else to check below
+    //don't break on authenticated unless thats their only role
+    if (empty($user_role_limit) && (count($user->roles) > 1) && ($value != 'authenticated user')) {
+      return;
+    }
+    //keep resetting this value to the highest value we've found
+    $user_limit = max($user_limit, $user_role_limit);
+  }
+  return $user_limit;
+}
+
+/**
+ * hook_form_alter()
+ */
+function user_relationship_limits_form_alter(&$form, &$form_state, $form_id) {
+  switch ($form_id) {
+  case 'user_relationships_admin_settings':
+    global $user;
+    $relationships = user_relationships_types_load();
+    $form['settings']['limits'] = array(
+      '#type'   => 'fieldset',
+      '#title'  => t('Role Limits'),
+      '#tree'   => TRUE,
+      '#description' => t('Enter the maximum number of relationships (pending and active) allowed per role. Enter O for unlimited.'),
+      '#weight' => 9,
+    );
+    $form['settings']['limits']['tabs'] = array(
+      '#type'   => 'vertical_tabs',
+    );
+
+    //perform a check to make sure we have an active relationship to work with
+    if (empty($relationships)) {
+      $form['settings']['limits']['tabs']['empty-message'] = array(
+        '#type'   => 'markup',
+        '#value'  => t('You currently have no active relationships'),
+      );
+    }
+    else {
+      //generate a section of the form for each individual relationship
+      foreach ($relationships as $key => $value) {
+        $rtid = $value->rtid;
+        $form['settings']['limits']['tabs'][$value->name] = array(
+          '#type'          => 'fieldset',
+          '#title'         => check_plain($value->name),
+          '#tree'          => TRUE,
+        );
+
+        $user_roles = user_roles();
+        //check to see if relationship is limited to certain roles
+        if (!empty($value->roles)) {
+          foreach ($value->roles as $key => $role) {
+            $role_limit = user_relationship_limits_role_limit($rtid, $key);
+            if (empty($role_limit)) {
+              $role_limit = 0;
+            }
+            $form['settings']['limits']['tabs'][$value->name][$user_roles[$key]] = array(
+              '#type'           => 'textfield',
+              '#title'          => check_plain($user_roles[$role]),
+              '#default_value'  => $role_limit,
+              '#size'           => 4,
+              '#maxlength'      => 4,
+              '#description' => t('Set to 0 for unlimited'),
+            );
+          }
+        //no limitations set, proceed to find all roles
+        }
+        else {
+          foreach ($user_roles as $key => $role) {
+            $role_limit = user_relationship_limits_role_limit($rtid, $key);
+            if (empty($role_limit)) {
+              $role_limit = 0;
+            }
+            $form['settings']['limits']['tabs'][$value->name][$role] = array(
+              '#type'           => 'textfield',
+              '#title'          => check_plain($role),
+              '#default_value'  => $role_limit,
+              '#size'           => 4,
+              '#maxlength'      => 4,
+              '#description' => t('Set to 0 for unlimited'),
+            );
+          }
+
+        }
+      }
+      $form['settings']['limitglobals'] = array(
+        '#type'   => 'fieldset',
+        '#title'  => t('Global Limit Settings'),
+        '#tree'   => TRUE,
+        '#weight' => 9,
+      );
+      $form['settings']['limitglobals']['pending'] = array(
+        '#type'           => 'checkbox',
+        '#default_value'  => variable_get('user_relationship_limits_pending', 1),
+        '#title'          => 'Include relationships pending approval in limit totals?',
+      );
+      $form['#submit'][] = 'user_relationship_limits_submit';
+
+    }
+  break;
+  case 'user_relationships_admin_type_edit':
+    $relationship = user_relationships_type_load(array('name' => $form['name']['#default_value']));
+    if(empty($relationship)) {
+      //we need our relationship object for this to work properly so break if it doesn't exist yet
+      break;
+    }
+    $form['tabs']['limits'] = array(
+          '#type'         => 'fieldset',
+          '#title'        => 'Limits',
+          '#collapsible'  => FALSE,
+          '#collapsed'    => FALSE,
+          '#tree'         => TRUE,
+          '#weight'        => 9,
+        );
+        $user_roles = user_roles();
+        //check to see if relationship is limited to certain roles
+        if (!empty($relationship->roles)) {
+          foreach ($relationship->roles as $key => $role) {
+            $role_limit = user_relationship_limits_role_limit($relationship->rtid, $key);
+            if (empty($role_limit)) {
+              $role_limit = 0;
+            }
+            $form['tabs']['limits'][$relationship->name][$user_roles[$key]] = array(
+              '#type'           => 'textfield',
+              '#title'          => check_plain($user_roles[$role]),
+              '#default_value'  => $role_limit,
+              '#size'           => 4,
+              '#maxlength'      => 4,
+              '#description'    => t('Set to 0 for unlimited'),
+            );
+          }
+        //no limitations set, proceed to find all roles
+        }
+        else {
+          $rtid = $relationship->rtid;
+          foreach ($user_roles as $key => $role) {
+            $role_limit = user_relationship_limits_role_limit($rtid, $key);
+            if (empty($role_limit)) {
+              $role_limit = 0;
+            }
+            $form['tabs']['limits'][$relationship->name][$role] = array(
+              '#type'           => 'textfield',
+              '#title'          => check_plain($role),
+              '#default_value'  => $role_limit,
+              '#size'           => 4,
+              '#maxlength'      => 4,
+              '#description'    => t('Set to 0 for unlimited'),
+            );
+          }
+
+        }
+      $form['#submit'][] = 'user_relationship_limits_submit';
+    break;
+  }
+}
+
+function user_relationship_limits_submit(&$form, &$form_state) {
+  if($form['#id'] == 'user-relationships-admin-type-edit') {
+    foreach ($form_state['values']['limits'] as $key => $limits) {
+      $sql = "SELECT rtid FROM {user_relationship_types} WHERE name = :name";
+      $rtid = db_query($sql, array(':name'=>$key))->fetchField();
+      //vertical tabs adds extra value only need values to save
+      if(is_array($limits)) {
+        foreach ($limits as $key => $value) {
+          $rid = array_search($key, user_roles());
+          db_merge('user_relationship_limits')
+            ->key(array('rid' => $rid,'rtid'=>$rtid))
+            ->fields(array(
+              'role_limit' => $value
+            ))
+            ->execute();
+        }
+      }
+    }
+  }
+
+  //set our global pending settings if they exist
+  if($form['#id'] == 'user-relationships-admin-settings') {
+    //set our global pending settings if they exist
+    if($form_state['values']['limitglobals']['pending'] == 0) {
+      variable_set('user_relationship_limits_pending', 0);
+      drupal_set_message('Pending relationships excluded from limit calculations.');
+    } else {
+      variable_set('user_relationship_limits_pending', 1);
+      drupal_set_message('Pending relationships included in limit calculations.');
+    }
+    foreach ($form_state['values']['limits']['tabs'] as $key => $limits) {
+      $sql = "SELECT rtid FROM {user_relationship_types} WHERE name = :name";
+      $rtid = db_query($sql, array(':name'=>$key))->fetchField();
+      if(is_array($limits)) {
+        foreach ($limits as $key => $value) {
+          $rid = array_search($key, user_roles());
+          db_merge('user_relationship_limits')
+            ->key(array('rid' => $rid,'rtid'=>$rtid))
+            ->fields(array(
+              'role_limit' => $value
+            ))
+            ->execute();
+        }
+      }
+    }
+  }
+
+}

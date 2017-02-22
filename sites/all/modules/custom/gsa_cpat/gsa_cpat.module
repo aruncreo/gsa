@@ -1,0 +1,1261 @@
+<?php
+
+include_once('gsa_cpat.features.inc');
+
+define('GSA_CPAT_REQUIRED_CTOOLS_API', '2.0-alpha');
+
+// Response codes for external authentication
+define('GSA_CPAT_AUTHENTICATION_ERROR', 0);
+define('GSA_CPAT_AUTHENTICATION_FAILURE', 1);
+define('GSA_CPAT_AUTHENTICATION_SUCCESS', 2);
+define('GSA_CPAT_DATE_TYPE', 'gsa_cpat_date');
+define('GSA_CPAT_DATE_FORMAT', 'm/d/Y');
+
+
+
+
+/**
+ * Implementation of hook_init().
+ */
+function gsa_cpat_init() {
+  $module_path = drupal_get_path('module', 'gsa_cpat');
+  drupal_add_css($module_path .'/gsa_cpat.css');
+  drupal_add_js($module_path."/gsa_cpat.js", array('type' => 'file','scope' => 'footer', 'weight' => 5));
+ 
+}
+
+/**
+ * Implements hook_menu().
+ */
+function gsa_cpat_menu() {
+  $items = array();
+  $items['node/%node/renew'] = array(
+    'title' => 'Renew',
+    'description' => 'Return a CTAT post before it expires',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('gsa_cpat_renew_form', 1),
+    'access callback' => 'gsa_cpat_can_renew',
+    'access arguments' => array(1),
+    'file' => 'gsa_cpat.pages.inc',
+    'weight' => 2,
+    'type' => MENU_LOCAL_TASK,
+  );
+  $items['node/%node/contact'] = array(
+    'title' => 'Contact',
+    'description' => 'Contact the author of the CTAT node',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('gsa_cpat_contact_form', 1),
+    'access callback' => 'gsa_cpat_can_contact',
+    'access arguments' => array(1),
+    'file' => 'gsa_cpat.pages.inc',
+    'weight' => 3,
+    'type' => MENU_LOCAL_TASK,
+  );
+  $items['node/%node/message/%gsa_cpat_message'] = array(
+    'title' => 'CTAT Message',
+    'description' => 'A submitted CTAT message',
+    'page callback' => 'gsa_cpat_message_page',
+    'page arguments' => array(1, 3),
+    'access callback' => 'gsa_cpat_can_view_message',
+    'access arguments' => array(1, 3),
+    'file' => 'gsa_cpat.pages.inc',
+    'type' => MENU_CALLBACK,
+  );
+  $items['cpat/join'] = array(
+    'title' => 'Authenticate to join the CTAT Group',
+    'description' => 'External authentication form to join CTAT group',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('gsa_cpat_group_authentication_form'),
+    'access callback' => 'user_is_logged_in',
+    'file' => 'gsa_cpat.pages.inc',
+    'type' => MENU_CALLBACK,
+  );
+  $items['admin/config/cpat'] = array(
+    'title' => 'GSA CTAT',
+    'description' => 'Contractor teaming arragements tool',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('gsa_cpat_admin_settings_form'),
+    'access arguments' => array('administer CPAT'),
+    'file' => 'gsa_cpat.admin.inc',
+    'type' => MENU_NORMAL_ITEM,
+  );
+  $items['admin/config/cpat/settings'] = array(
+    'title' => 'Settings',
+    'weight' => 0,
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+  );
+  $items['admin/config/cpat/queue'] = array(
+    'title' => 'Expiration queue',
+    'description' => 'A queue of CTAT node expirations',
+    'page callback' => 'gsa_cpat_expiration_queue',
+    'access arguments' => array('administer CPAT'),
+    'file' => 'gsa_cpat.admin.inc',
+    'weight' => 1,
+    'type' => MENU_LOCAL_TASK,
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_menu_alter().
+ */
+function gsa_cpat_menu_alter(&$items) {
+  $items['node/%views_arg/replies']['access callback'] = 'gsa_cpat_can_view_post_replies';
+}
+
+/**
+ * Implements hook_permission().
+ */
+function gsa_cpat_permission() {
+  $permissions = array();
+  $permission['contact CPAT authors'] = array(
+    'title' => t('Contact CPAT authors'),
+  );
+  $permissions['administer CPAT'] = array(
+    'title' => t('Administer CPAT'),
+  );
+  return $permissions;
+}
+
+/**
+ * Implementation of hook_ctools_plugin_directory().
+ */
+function gsa_cpat_ctools_plugin_directory($module, $plugin) {
+  // Safety: go away if CTools is not at an appropriate version.
+  if (!module_invoke('ctools', 'api_version', GSA_CPAT_REQUIRED_CTOOLS_API)) {
+    return;
+  }
+
+  if ($module == 'ctools') {
+    return 'plugins/' . $plugin;
+  }
+}
+
+
+/**
+ * Implements hook_theme().
+ */
+function gsa_cpat_theme($existing, $type, $theme, $path) {
+  $registry = array();
+  $registry['gsa_cpat_message'] = array(
+    'variables' => array('node' => NULL, 'message' => NULL),
+    'path' => $path . '/theme',
+    'template' => 'gsa_cpat_message',
+  );
+  $registry['gsa_cpat_manual_button'] = array(
+    'variables' => array('link' => NULL),
+  );
+  return $registry;
+}
+
+/**
+ * Implements hook_node_access().
+ */
+function gsa_cpat_node_access($node, $op, $account) {
+  $access = NODE_ACCESS_IGNORE;
+  // Create operation
+  if ($op == 'create') {
+    // Operating on CPAT nodes
+    if ($node == 'gsa_cpat') {
+      // Only enforce for non-admins
+      if (!user_access('administer nodes')) {
+        // No access if we don't yet have a CPAT group
+        if (!($cpat = gsa_cpat_get_cpat_group())) {
+          $access = NODE_ACCESS_DENY;
+        }
+        // No access if the user is not a member
+        else if (!og_is_member($cpat->gid)) {
+          $access = NODE_ACCESS_DENY;
+        }
+      }
+    }
+  }
+  return $access;
+}
+
+/**
+ * Implements hook_node_presave().
+ */
+function gsa_cpat_node_presave($node) {
+  if ($node->type == 'gsa_cpat') {
+    // Force the CPAT group
+    if ($cpat = gsa_cpat_get_cpat_group(FALSE)) {
+      $field = &$node->{OG_AUDIENCE_FIELD};
+      $field = array(
+        LANGUAGE_NONE => array(
+          0 => array(
+            'gid' => $cpat,
+          )
+        )
+      );
+    }
+    // Delete any selected category headings
+    foreach ($node->field_cpat_category[LANGUAGE_NONE] as $k => $v) {
+      if (intval($v['value']) < 0) {
+        unset($node->field_cpat_category[LANGUAGE_NONE][$k]);
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_node_save().
+ */
+function gsa_cpat_node_insert($node) {
+  // Begin tracking this node for expiration
+  if ($node->type == 'gsa_cpat') {
+    db_insert('gsa_cpat_expire')
+      ->fields(array(
+        'nid' => $node->nid,
+        'renewed' => $node->created,
+        'send_notifications' => $node->gsa_cpat_send_notifications,
+      ))
+      ->execute();
+  }
+}
+
+/**
+ * Implements hook_node_delete().
+ */
+function gsa_cpat_node_delete($node) {
+  if ($node->type == 'gsa_cpat') {
+    // Remove the expiration tracker for this node
+    db_delete('gsa_cpat_expire')
+      ->condition('nid', $node->nid)
+      ->execute();
+    // Remove messages
+    db_delete('gsa_cpat_message')
+      ->condition('nid', $node->nid)
+      ->execute();
+  }
+}
+
+/**
+ * Implements hook_node_load().
+ */
+function gsa_cpat_node_load($nodes, $types) {
+  // Fetch all records for these nodes
+  $records = db_select('gsa_cpat_expire')
+    ->fields('gsa_cpat_expire')
+    ->condition('nid', array_keys($nodes), 'IN')
+    ->execute();
+
+  // Attach the fields we need
+  foreach ($records as $record) {
+    $nodes[$record->nid]->gsa_cpat_renewed = $record->renewed;
+    $nodes[$record->nid]->gsa_cpat_send_notifications = $record->send_notifications;
+  }
+}
+
+/**
+ * Implements hook_node_update().
+ */
+function gsa_cpat_node_update($node) {
+  if ($node->type == 'gsa_cpat') {
+    // Renew the post
+    gsa_cpat_renew_post($node);
+    // Set the notifications settings
+    db_update('gsa_cpat_expire')
+      ->fields(array(
+        'send_notifications' => $node->gsa_cpat_send_notifications
+      ))
+      ->condition('nid', $node->nid)
+      ->execute();
+  }
+}
+
+/**
+ * Implements hook_node_validate().
+ */
+function gsa_cpat_node_validate($node, $form, &$form_state) {
+  if ($node->type == 'gsa_cpat') {
+  	//Checking whether close date is smaller than open date
+  	$closedate = strtotime($node->field_cpat_close_date[$node->language][0]['value']);
+	$opendate = strtotime($node->field_cpat_open_date[$node->language][0]['value']);
+	
+	if($opendate > $closedate && ($opendate != NULL && $closedate !=NULL )){	
+		form_set_error('field_cpat_close_date', t('Oppertunity close date can\'t be smaller than open date'));
+		form_set_error('field_cpat_open_date', '');	
+	}
+	if($opendate == NULL || $closedate == NULL){
+		form_set_error('field_cpat_open_date', '');	
+		form_set_error('field_cpat_close_date', '');	
+		
+	}
+	
+    // Delete any selected category headings
+    foreach ($node->field_cpat_category[LANGUAGE_NONE] as $k => $v) {
+      if (intval($v['value']) < 0) {
+        unset($node->field_cpat_category[LANGUAGE_NONE][$k]);
+      }
+    }
+    // Fail validation if no real categories are selected
+    if (count($node->field_cpat_category[LANGUAGE_NONE]) == 0) {
+      form_set_error('field_cpat_category_value', t('Category is required.'));
+    }
+  }
+}
+
+/**
+ * Implements hook_node_view().
+ */
+function gsa_cpat_node_view($node, $view_mode, $langcode) {
+  if ($node->type == 'gsa_cpat') {
+    // Add CSS
+    $node->content['#attached']['css'][] = drupal_get_path('module', 'gsa_cpat') . '/theme/cpat.css';
+    // Get the current group
+    $group = og_features_get_group_context();
+    // Reset the breadcrumb
+    og_set_breadcrumb('node', $node->nid, array(l(t('Group'), "node/{$node->nid}/group")));
+  }
+
+  // Insert custom content on group home page
+  // @todo: group node overridden by panel
+  if ($view_mode == 'full') {
+    if ($group = gsa_cpat_get_cpat_group()) {
+      if ($group->entity_type == 'node' && $group->etid == $node->nid) {
+        $node->content['group_prompts'] = array(
+          '#type' => 'item',
+          '#markup' => _gsa_cpat_ghp_prompts(),
+          '#weight' => $node->content['body']['#weight'] +1,
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_form_alter().
+ */
+function gsa_cpat_form_alter(&$form, &$form_state, $form_id) {
+  // See if this is a node form
+  if (isset($form['#node_edit_form']) && $form['#node_edit_form']) {
+    // See if this is a CPAT node
+    // We have to do this, instead of using hook_form_FORM_ID_alter()
+    // because we're altering what another module altered via this hook
+    // so, the changes are only available here
+    if ($form['#node']->type == 'gsa_cpat') {
+      // See if we have a disclaimer to show
+      if (($disclaimer = variable_get('gsa_cpat_disclaimer', FALSE)) && !isset($form['#node']->nid)) {
+        // Add the disclaimer
+        $form['gsa_cpat_disclaimer'] = array(
+          '#type' => 'fieldset',
+          '#title' => t('Disclaimer'),
+          '#weight' => 100000,
+        );
+        $form['gsa_cpat_disclaimer']['gsa_cpat_disclaimer_message'] = array(
+          '#type' => 'textarea',
+          '#default_value' => $disclaimer,
+          '#disabled' => TRUE,
+        );
+        $form['gsa_cpat_disclaimer']['gsa_cpat_disclaimer_agreement'] = array(
+          '#type' => 'checkbox',
+          '#default_value' => 0,
+          '#required' => TRUE,
+          '#title' => t('By checking this box, you agree to the disclaimer above.'),
+          '#element_validate' => array('_gsa_cpat_validate_disclaimer'),
+        );
+      }
+      
+      // Add an opt-out option for renewal notifications
+      $form['gsa_cpat_send_notifications'] = array(
+        '#type' => 'checkbox',
+        '#title' => t('Email me a reminder when this post is about to expire.'),
+        '#default_value' => isset($form['#node']->gsa_cpat_send_notifications) ? $form['#node']->gsa_cpat_send_notifications : 1,
+        // Only show if expirations are enabled
+        '#access' => variable_get('gsa_cpat_expiration_days', 0),
+        '#weight' => 5,
+      );
+    
+      // Hide group audience selector
+      if (isset($form[OG_AUDIENCE_FIELD])) {
+        if (!user_access('administer nodes')) {
+          $form[OG_AUDIENCE_FIELD]['#access'] = FALSE;
+        }
+      }
+      
+     //Adding Instruction teaming responsability in gsa_cpat content type
+      	$instruction_text = '<label>Instructions:</label> Contractors looking to enter into a teaming arrangement are required to spell out the functions that each party will perform. Use the following fields to clarify the responsibilities of each party involved. The more details you can provide, the better quality response you are likely to get from a potential teaming partner.';
+    	$form['field_gsa_teaming_responsibility']['und']['#prefix'] = $instruction_text.'<br/>'.$form['field_gsa_teaming_responsibility']['und']['#prefix'];
+    	
+    }
+  }
+}
+
+/**
+ * Implements hook_form_views_exposed_form_alter().
+ */
+/*
+function gsa_cpat_form_views_exposed_form_alter(&$form, &$form_state) {
+  // Act on the cpat_opportunities view
+  if ($form_state['view']->name == 'cpat_opportunities') {
+    // Add a button to clear the filters
+    $form['clear'] = array(
+      '#type' => 'submit',
+      '#value' => t('Clear'),
+      '#submit' => array('_gsa_cpat_views_form_clear'),
+      '#clear_url' => $_GET['q'],
+    );
+  }
+}
+*/
+
+/**
+ * Implements hook_cron().
+ */
+function gsa_cpat_cron() {
+  // Determine if expiration for cpat nodes has been enabled
+  if ($expiration = variable_get('gsa_cpat_expiration_days', 0)) {
+    // Find cpat nodes that have expired, if we're set to expire them    
+    $results = db_select('gsa_cpat_expire')
+      ->fields('gsa_cpat_expire', array('nid'))
+      ->condition('renewed', time() - ($expiration * 86400), '<=')
+      ->execute()
+      ->fetchCol();
+    
+    // Delete the expired nodes
+    foreach($results as $nid) {
+      node_delete($nid);
+    }
+  
+    $first_notification = variable_get('gsa_cpat_expiration_first_notification', 0);
+    $second_notification = variable_get('gsa_cpat_expiration_second_notification', 0);
+    
+    // Find cpat nodes that require a first or second notification
+    if ($first_notification) {
+      $query = db_select('gsa_cpat_expire', 'gce');
+      $query->leftJoin('node', 'n' ,'n.nid = gce.nid');
+      $query->leftJoin('users', 'u', 'u.uid = n.uid');
+      $query->fields('gce', array('nid,', 'renewed'));
+      $query->fields('n', array('title'));
+      $query->fields('u', array('name', 'mail', 'language'));
+      $query->condition('gce.send_notifications', '1', '=');
+      $query->condition('n.status', '1', '=');
+      
+      if (!$second_notification) {
+        $query->condition('gce.notifications', '0', '=');
+        $query->condition('gce.renewed', REQUEST_TIME - (($expiration - $first_notification) * 86400), '<=');
+      }
+      else {
+        $query->condition(db_or()
+          ->condition(db_and()->condition('gce.notifications', '0', '=')->condition('gce.renewed', REQUEST_TIME - (($expiration - $first_notification) * 86400), '<='))
+          ->condition(db_and()->condition('gce.notifications', '1', '=')->condition('gce.renewed', REQUEST_TIME - (($expiration - $second_notification) * 86400), '<='))
+        );
+      }
+
+      
+      $results = $query->execute();
+      
+      // Send the alerts
+      foreach ($results as $result) {
+        drupal_mail(
+          'gsa_cpat',
+          'expiration_notification',
+          $result->mail,
+          user_preferred_language($result),
+          array(
+            'title' => $result->title,
+            'nid' => $result->nid,
+            'uid' => $result->uid,
+            'name' => $result->name,
+            'renewed' => $result->renewed,
+            'expires' => $result->renewed + ($expiration * 86400),
+          )
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_form_og_features_feature_form_alter().
+ *
+ * Alter the OG Features selection form
+ */
+function gsa_cpat_form_og_features_feature_form_alter(&$form, &$form_state) {
+  // Remove the option for the CPAT feature
+  unset($form['feature-gsa_cpat']);
+}
+
+/**
+ * Implements hook_form_og_ui_confirm_subscribe_alter().
+ */
+function gsa_cpat_form_og_ui_confirm_subscribe_alter(&$form, &$form_state) {
+  // See if this is the CPAT group
+  if ($form['group']['#value']->gid == gsa_cpat_get_cpat_group(FALSE)) {
+    // Redirect to the CPAT auth form
+    drupal_goto('cpat/join');
+  }
+}
+
+/**
+ * Implements hook_mail().
+ */
+function gsa_cpat_mail($key, &$message, $params) {
+  switch ($key) {
+    case 'questionable_notification':
+      $message['subject'] = t('Post flagged as questionable: !title', array('!title' => $params['node']->title));
+      $message['body'] = array();
+      $message['body'][] = t('Hi !user,', array('!user' => $params['account']->name));
+      $message['body'][] = t('The post, "!title", has been flagged as being questionable !limit or more times by the community.', array('!title' => check_plain($params['node']->title), '!limit' => variable_get('gsa_cpat_questionable_threshold', 10)));
+      $message['body'][] = t('View the post: !link', array('!link' => url('node/' . $params['node']->nid, array('absolute' => TRUE))));
+      $message['body'][] = t('Edit the post: !link', array('!link' => url('node/' . $params['node']->nid . '/edit', array('absolute' => TRUE))));
+      $message['body'][] = t('Delete the post: !link', array('!link' => url('node/' . $params['node']->nid . '/delete', array('absolute' => TRUE))));
+      break;
+      
+    case 'expiration_notification':
+      $message['subject'] = t('Your CTAT post is going to expire soon!');
+      $message['body'] = array();
+      $message['body'][] = t('Hi !user,', array('!user' => $params['name']));
+      $message['body'][] = t('The post, "!title", was last renewed at !renewed, and is set to expire at !expires. Once the post expires, it will be permanently deleted.', array('!title' => check_plain($params['title']), '!renewed' => format_date($params['renewed']), '!expires' => format_date($params['expires'])));
+      $message['body'][] = t('To renew your post, please follow the link below:');
+      $message['body'][] = url('node/' . $params['nid'] . '/renew', array('absolute' => TRUE));
+
+   		db_update('gsa_cpat_expire')
+  			->expression('notifications', 'notifications + 1')
+  			->condition('nid', $params['nid'], '=')
+  			->execute();
+        
+      break;
+      
+    case 'contact_notification':
+      $message['subject'] = t('A message has been submitted on your CTAT post.');
+      $message['body'] = array();
+      $message['body'][] = t('A user has submitted a message on your CTAT post, "!title".', array('!title' => check_plain($params['node']->title)));
+      $message['body'][] = t('To view the message, follow the link below:');
+      $message['body'][] = url('node/' . $params['node']->nid . '/message/' . $params['mid'], array('absolute' => TRUE));
+      break;
+  }
+}
+
+/**
+ * Implements hook_load().
+ */
+function gsa_cpat_message_load($mid) {
+  static $messages = array();
+  
+  // Make sure the message ID is numeric
+  if (!is_numeric($mid)) {
+    return FALSE;
+  }
+  
+  // Check static cache
+  if (!isset($messages[$mid])) {
+    // Build a query
+    $query = db_select('gsa_cpat_message', 'gcm');
+    $query->leftJoin('node', 'n', 'n.nid = gcm.nid');
+    $query->fields('gcm');
+    $query->addExpression('n.title', 'post');
+    $query->condition('gcm.mid', $mid);
+ 
+    // Fetch the message
+    if ($message = $query->execute()->fetchObject()) {
+      // Load the sender
+      $message->sender = user_load($message->sender_uid);
+    } 
+    
+    $messages[$mid] = $message ? $message : NULL;
+  }
+
+  return $messages[$mid];
+}
+
+/**
+ * Implements hook_og_features_registry().
+ */
+function gsa_cpat_og_features_registry() {
+  $registry = array();
+  
+  // Features: gsa_cpat
+  $feature = new stdClass;
+  $feature->id = 'gsa_cpat';
+  $feature->name = t('Contractor teaming arragements tool');
+  $feature->description = t('Contractor teaming arragements tool');
+  $feature->components = array(
+    'node' => array(
+      'gsa_cpat',
+    ),
+    'views' => array(
+      'cpat_opportunities',
+      'cpat_messages',
+    ),
+  );
+  $registry[$feature->id] = $feature;
+  
+  return $registry;
+}
+
+/**
+ * Implements hook_og_features_disabled_alter().
+ */
+function gsa_cpat_og_features_disabled_alter(&$disabled, $group) {
+  // If this group is not the CPAT group
+  if ($group->gid != gsa_cpat_get_cpat_group(FALSE)) {
+    // Force-disable the BPA feature
+    $disabled['gsa_cpat'] = 'gsa_cpat';
+  }
+  else {
+    // Force-enable the BPA feature
+    unset($disabled['gsa_cpat']);
+  }
+}
+
+/**
+ * Implements hook_flag().
+ */
+function gsa_cpat_flag($op, $flag, $content_id, $account, $fcid) {
+  // Item was flagged
+  if ($op == 'flag') {
+    // If the CPAT Questionable flag was used
+    if ($flag->name == 'cpat_questionable') {
+      // See if we have a threshold set for questionable content
+      if ($threshold = variable_get('gsa_cpat_questionable_threshold', 10)) {
+        // Determine the amount of times this has been flagged
+        $count = $flag->get_count($content_id);
+        // If the count as at or above the threshold, notify the admin
+        if ($count >= $threshold) {
+          gsa_cpat_notify_questionable_content($content_id);
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_views_pre_render().
+ */
+function gsa_cpat_views_pre_render(&$view) {
+  // @todo: test this
+  
+  // See if we're inside a group
+  if ($group = og_features_get_group_context()) {
+    // See if we're inside the CPAT group
+    if ($group->gid == gsa_cpat_get_cpat_group(FALSE)) {
+      // See if this is a node view
+      if ($view->base_table == 'node') {
+        // Gather the nodes that were returned
+        $nodes = array();
+        foreach ($view->result as $result) {
+          // Make sure the comment count field is present, otherwise
+          // we no longer need to process here
+          if (!isset($result->node_comment_statistics_comment_count)) {
+            return;
+          }
+          $nodes[$result->nid] = $result->nid;
+        }
+        // Determine how many CPAT replies were made on these nodes
+        if (!empty($nodes)) {
+          $query = db_select('gsa_cpat_message')
+            ->fields('gsa_cpat_message', array('nid'))
+            ->condition('nid', $nodes, 'IN');
+          $query->addExpression('COUNT(nid)', 'total');
+          $query->groupBy('nid');
+          $results = $query->execute()->fetchAll();
+        
+          $messages = array();
+          foreach ($results AS $message) {
+            $messages[$message->nid] = $message->total;
+          }
+      
+          // Inject the message reply count as the comment count
+          if (!empty($messages)) {
+            foreach ($view->result as $key => $result) {
+              if (isset($messages[$result->nid]) && $messages[$result->nid]) {
+                $view->result[$key]->node_comment_statistics_comment_count = $messages[$result->nid];
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_gsa_group_page_group_menu_alter().
+ */
+function gsa_cpat_gsa_group_page_group_menu_alter(&$menu, $group, $node) {
+  if ($cpat = gsa_cpat_get_cpat_group($load = TRUE)) {
+    if ($cpat == og_features_get_group_context()) {
+      // Fix the pluralizing of CPAT nodes
+      
+      unset($menu['explore']);
+      $ctat_opportunity_menu = l(t('view opportunities'), "node/{$node->nid}/cpat-opportunities");
+      $ctat_insert = array($ctat_opportunity_menu);
+      //Adding the 'view opportunities' menu afetr 'Home'
+      array_splice($menu, 1, 0, $ctat_insert );
+      
+      unset($menu['contribute']);
+      $ctat_opportunity_contribute_menu =l('create opportunities', "node/add/gsa-cpat",  array('query' =>  array("gids_{$group->bundle_name}" => array($group->gid))));
+      $ctat_contribute_insert = array($ctat_opportunity_contribute_menu);
+      //Adding the 'view opportunities' menu afetr 'Home'
+      array_splice($menu, 2, 0, $ctat_contribute_insert );
+      
+      
+      
+ 
+      // Add "My replies" link
+      $menu['mysettings']['items']['cpat_my_replies'] = l(t('My replies'), "node/{$node->nid}/my-replies");
+    }
+  }
+}
+
+/**
+ * Notify the group admin of a CPAT post that has been marked as
+ * questionable more than the threshold count allows for
+ *
+ * @param $nid
+ *   The node ID
+ */
+function gsa_cpat_notify_questionable_content($nid) {
+  $accounts = array();
+  
+  // Load the node
+  $node = node_load($nid);
+  
+  // Load the group
+  $group = og_load(reset(og_get_entity_groups('node', $node)));
+  
+  // Get the group owner
+  if ($owner = $group->user()) {
+    $accounts[$owner->uid] = $owner;
+  }
+  
+  // Get group admins
+  $uids = array();
+  $roles = og_roles();
+  $rid = array_search(OG_ADMINISTRATOR_ROLE, $roles);
+  $results = og_get_users_by_roles($group->gid, array($rid));
+  foreach ($results as $result) {
+    // Avoid duplicate users
+    if (isset($owner->uid)) {
+      if ($result->uid == $owner->uid) {
+        continue;
+      }
+    }
+    $uids[] = $result->uid;
+  }
+  
+  // Load and append the admins
+  if ($uids) {
+    if ($admins = user_load_multiple($uids)) {
+      $accounts += $admins;
+    }
+  }
+  
+  // Send the notification email
+  foreach ($accounts as $admin) {
+    drupal_mail(
+      'gsa_cpat',
+      'questionable_notification',
+      $admin->mail,
+      user_preferred_language($admin),
+      array(
+        'account' => $admin,
+        'node' => $node,
+      )
+    );
+  }
+}
+
+
+
+/**
+ * Validation callback for the disclaimer on the node form
+ */
+function _gsa_cpat_validate_disclaimer($element, &$form_state) {
+  // Ensure that the disclaimer checkbox was checked
+  // #required doesn't seem to work with checkboxes
+  if (!$form_state['values']['gsa_cpat_disclaimer_agreement']) {
+    form_set_error('gsa_cpat_disclaimer_agreement', t('You must agree to the disclaimer before posting.'));
+  }
+}
+
+/**
+ * Helper function to fetch the CPAT group
+ *
+ * @param $load
+ *   TRUE if the node should be loaded, FALSE to simply
+ *   return the nid. Defaults to TRUE.
+ * @return
+ *   The CPAT group, if available, otherwise FALSE.
+ */
+function gsa_cpat_get_cpat_group($load = TRUE) {
+  if ($cpat = variable_get('gsa_cpat_group', FALSE)) {
+    if ($load) {
+      if ($group = og_load($cpat)) {        
+        return $group;
+      }
+      else {
+        return FALSE;
+      }
+    }
+    else {
+      return $cpat;
+    }
+  }
+  
+  return FALSE;
+}
+
+/**
+ * Access callback to determine if a user can renew a post
+ *
+ * @param $node
+ *   The node being renewed
+ */
+function gsa_cpat_can_renew($node) {
+  global $user;
+  
+  // See if this is a CPAT post
+  if ($node->type != 'gsa_cpat') {
+    return FALSE;
+  }
+  
+  // Make sure this node is published
+  if (!$node->status) {
+    return FALSE;
+  }
+  
+  // See if expirations are enabled
+  if (!($expiration = variable_get('gsa_cpat_expiration_days', 0))) {
+    return FALSE;
+  }
+  
+  //Checking the allowed period of renewal
+  if ($period = variable_get('gsa_cpat_renewal_period', 0)) {
+      // Determine how many days this node is from being expired
+      $expires_in = $expiration - floor((time() - $node->gsa_cpat_renewed) / 86400);
+      
+      //Check if opportunity already expired
+      if($expires_in < 0){
+      	return FALSE;	
+			}
+      
+      // See if this node is within the allowed renewal period
+      if ($expires_in > $period) {
+        return FALSE;
+      }
+  }
+  
+  
+  
+  // Administer Group permission.
+  if (og_user_access(21,'administer group')) {
+    return TRUE;
+  }
+  
+	//Checking whether user has edit permission
+  if(og_user_access(21,'update own gsa_cpat content') && ($node->uid == $user->uid)){
+		 return TRUE;
+	}
+      	
+  // Admins can always renew
+  if ((user_access('administer nodes') || user_access('administer CPAT')) && og_user_access(21,'update any gsa_cpat content')) {
+      return TRUE;
+  }
+  
+  return FALSE;
+}
+
+/**
+ * Access callback to determine if a user can contact a CPAT author
+ *
+ * @param $node
+ *   The CPAT node
+ */
+function gsa_cpat_can_contact($node) {
+  global $user;
+  
+  // See if this is a CPAT post
+  if ($node->type != 'gsa_cpat') {
+    return FALSE;
+  }
+  
+  // Admins can always contact
+  if (user_access('administer nodes') || user_access('administer CPAT')) {
+    return TRUE;
+  }
+  
+  // Make sure this node is published
+  if (!$node->status) {
+    return FALSE;
+  }
+  
+  // See if this user is not the author
+  if ($user->uid != $node->uid) {
+    // Make sure the user is a member of the group
+    if (og_is_member(gsa_cpat_get_cpat_group(FALSE))) {
+      // Check permissions
+      if (user_access('contact CPAT authors')) {
+        return TRUE;
+      }
+    }
+  }
+  
+  return FALSE;
+}
+
+/**
+ * Access callback to view a CPAT message
+ *
+ * @param $node
+ *   The CPAT node
+ * @param $message
+ *   The CPAT message
+ */
+function gsa_cpat_can_view_message($node, $message) {
+  global $user;
+ 
+  // Make sure this is a CPAT node
+  if ($node->type != 'gsa_cpat') {
+    return FALSE;
+  }
+  
+  // Make sure the nids match
+  if ($node->nid != $message->nid) {
+    return FALSE;
+  }
+  
+  // Higher permissions always allowed
+  if (user_access('administer nodes') || user_access('administer CPAT')) {
+    return TRUE;
+  }
+  
+  // See if the current user is the node author
+  if ($node->uid == $user->uid) {
+    return TRUE;
+  }
+  
+  return FALSE;
+}
+
+/**
+ * Access callback for CPAT node replies list (view override)
+ */
+function gsa_cpat_can_view_post_replies() {
+  global $user;
+
+  // Load the node
+  if (arg(0) == 'node' && is_numeric(arg(1))) {
+    if ($node = node_load(arg(1))) {
+      if ($node->type == 'gsa_cpat') {
+      	
+      	if (!$node->status) {
+          return FALSE;
+        }
+        
+        // Administer Group permission.
+  			if (og_user_access(21,'administer group')) {
+    			return TRUE;
+  			}
+      
+      	//Checking whether user has edit permission
+  			if(og_user_access(21,'update own gsa_cpat content') && ($node->uid == $user->uid)){
+					return TRUE;
+				}
+      	
+        // Admins can always renew
+        if ((user_access('administer nodes') || user_access('administer CPAT')) && og_user_access(21,'update any gsa_cpat content')) {
+          return TRUE;
+        }
+      }
+    }
+  }
+  return FALSE;
+}
+
+/**
+ * Determine the email address to use to notify a user about a CPAT
+ * contact message.
+ *
+ * @param $node
+ *   The CPAT node
+ * @return
+ *   The email address that the notification should be sent to. If
+ *   notifications are not enabled for this CPAT node, FALSE will
+ *   be returned.
+ */
+function _gsa_cpat_contact_notification_address($node) {
+  global $user;
+  
+  // Make sure this is a CPAT node
+  if ($node->type != 'gsa_cpat') {
+    return FALSE;
+  }
+  
+  // Make sure this node is enabled
+  if (!$node->status) {
+    return FALSE;
+  }
+  
+  // See if notifications have been enabled for this node
+  if (isset($node->field_cpat_notifications[LANGUAGE_NONE][0]['value']) && $node->field_cpat_notifications[LANGUAGE_NONE][0]['value']) {
+    return isset($node->field_cpat_email[LANGUAGE_NONE][0]['email']) ? $node->field_cpat_email[LANGUAGE_NONE][0]['email'] : $user->mail;
+  }
+  
+  return FALSE;
+}
+
+/**
+ * Renew a CPAT post
+ *
+ * @param $node
+ *   The node object or nid
+ */
+function gsa_cpat_renew_post($node) {
+  // Determine the node nid
+  $nid = is_object($node) ? $node->nid : $node;
+  
+  db_update('gsa_cpat_expire')
+    ->fields(array(
+      'renewed' => time(),
+      'notifications' => '0'
+    ))
+    ->condition('nid', $nid)
+    ->execute();
+}
+
+/**
+ * Authenticate a contract number and password against the CPAT
+ * external authentication
+ *
+ * @param $contract
+ *   The supplied contract number
+ * @param $password
+ *   The supplied password
+ * @return
+ *   'success' if authentication succeeded, 'failure' if it did not,
+ *   'error' if a web service error occurred.
+ */
+function gsa_cpat_authenticate($contract, $password) {
+  // Sanitize the values
+  $contract = filter_xss($contract);
+  $password = filter_xss($password);
+  
+  // Make sure we have both values present
+  if (!$contract || !$password) {
+    return GSA_CPAT_AUTHENTICATION_FAILURE;
+  }
+  
+  if (variable_get('gsa_cpat_authentication_demo_mode', 0) == 1) {
+    // The demo mode is enabled; accept a dummy contract number/password.
+    if ($contract == 'GS23F0000K' && $password == '3210ABCD%') {
+      return GSA_CPAT_AUTHENTICATION_SUCCESS;
+    }
+  } else if ($wsdl = variable_get('gsa_cpat_wsdl_url', NULL)) {
+    // Attempt to use the web service for authentication
+    try {
+      $sc = new SoapClient($wsdl);
+      $response = $sc->checkAuth($contract, $password);
+      if (strtolower(trim($response)) == 'yes') {
+        return GSA_CPAT_AUTHENTICATION_SUCCESS;
+      }
+    } 
+    catch (Exception $e) {
+      watchdog('gsa_cpat', 'Error connecting to the VSC web service: '. print_r($e, 1), array(), WATCHDOG_WARNING);
+      return GSA_CPAT_AUTHENTICATION_ERROR;
+    }
+  }
+
+  return GSA_CPAT_AUTHENTICATION_FAILURE;
+}
+
+/**
+ * CPAT message operations form
+ */
+function gsa_cpat_message_operations_form($form, &$form_state, $node, $message) {
+  // Operation options
+  $options = array();
+  if ($message->reviewed) {
+    $options['unreview'] = t('Mark as unreviewed');
+  }
+  else {
+    $options['review'] = t('Mark as reviewed');
+  }
+  $options['delete'] = t('Delete');
+  
+  // The form
+  $form['#mid'] = $message->mid;
+  $form['#nid'] = $node->nid;
+  $form['wrapper'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Operations'),
+  );
+  $form['wrapper']['operation'] = array(
+    '#type' => 'select',
+    '#options' => $options,
+    '#default_value' => isset($options['review']) ? 'review' : 'unreview',
+  );
+  $form['wrapper']['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Execute'),
+  );
+  return $form;
+}
+
+/**
+ * Submit handler for the message operations form
+ */
+function gsa_cpat_message_operations_form_submit(&$form, &$form_state) {
+  // Prep the operation
+  switch ($form_state['values']['operation']) {
+    case 'review':
+      db_update('gsa_cpat_message')
+        ->fields(array(
+          'reviewed' => 1
+        ))
+        ->condition('mid',  $form['#mid'])
+        ->execute();
+      
+      $message = t('The message has been marked as <em>reviewed</em>.');
+      break;
+      
+    case 'unreview':
+      db_update('gsa_cpat_message')
+        ->fields(array(
+          'reviewed' => 0
+        ))
+        ->condition('mid',  $form['#mid'])
+        ->execute();
+      
+      $message = t('The message has been marked as <em>unreviewed</em>.');
+      break;
+      
+    case 'delete':
+      db_delete('gsa_cpat_message')
+        ->condition('mid', $form['#mid'],'=')
+        ->execute();
+
+      $message = t('The message has been deleted.');
+      break;
+  }
+  
+  // Set a status message
+  drupal_set_message($message);
+  
+  // Redirect back to the original node
+  $form_state['redirect'] = 'node/' . $form['#nid'];
+}
+
+/**
+ * Form submit callback to clear a view's filters
+ *
+ * Deprecated, using Views 3 reset button
+ */
+function _gsa_cpat_views_form_clear(&$form, &$form_state) {
+  drupal_goto($form['clear']['#clear_url']);
+}
+
+/**
+ * Theme preprocess hook for CPAT messages
+ */
+function template_preprocess_gsa_cpat_message(&$vars) {
+  // Set the title
+  drupal_set_title(t('Reply to: !title', array('!title' => check_plain($vars['node']->title))));
+  // Convert newlines to HTML breaks
+  $vars['message']->message = str_replace("\n", '<br/>', $vars['message']->message);
+  // Add the operations form
+  $vars['form'] = drupal_render(drupal_get_form('gsa_cpat_message_operations_form', $vars['node'], $vars['message']));
+  // Format the username
+  $vars['username'] = theme('username', array('account' => $vars['message']->sender, 'name' => $vars['message']->sender->name));
+  // Add CSS
+  drupal_add_css(drupal_get_path('module', 'gsa_cpat') . '/theme/cpat.css');
+}
+
+/**
+ * Group home page prompts
+ */
+function _gsa_cpat_ghp_prompts() {
+  global $user;
+  $prompts = array();
+  
+  // Fetch the CPAT group
+  if (!($group = gsa_cpat_get_cpat_group())) {
+    return NULL;
+  }
+  
+  // Check if the current user is not a group member
+  if (!og_is_member($group->gid)) {
+    // User is logged in
+    if (user_is_logged_in()) {
+      $link = l(t('Join CTAT'), 'cpat/join');
+      $prompt = check_plain(variable_get('gsa_cpat_ghp_prompt_join', t('Join the CTAT group')));
+      $prompts[] = '<p style="clear:both;">' . theme('gsa_cpat_manual_button', $link) . $prompt . '</p>';
+    }
+  } 
+  else {
+    // Member with CPAT node create perms
+    if (user_access('create gsa_cpat content')) {
+      $link = l(t('Post CTAT Opportunity'), 'node/add/gsa-cpat', array('query' => array("gids_{$group->bundle_name}" => array($group->gid))));
+      $prompt = check_plain(variable_get('gsa_cpat_ghp_prompt_post', t('Post an opportunity')));
+      $prompts[] = '<p style="clear:both;">' . theme('gsa_cpat_manual_button', $link) . $prompt . '</p>';
+    }
+    // Any member
+    $link = l(t('Search Opportunities'), 'node/' . $group->nid . '/cpat-opportunities');
+    $prompt = check_plain(variable_get('gsa_cpat_ghp_prompt_search', t('Find an opportunity')));
+    $prompts[] = '<p style="clear:both;">' . theme('gsa_cpat_manual_button', $link) . $prompt . '</p>';
+  }
+  
+  return implode('', $prompts);
+}
+
+/**
+ * Theme function for manual button
+ */
+function theme_gsa_cpat_manual_button($link) {
+  return '<div class="gsa_cpat_manual_button" style="float: right;">' . $link . '</div>';
+}
+
+/**
+* Implements hook_og_user_access_alter().
+*/
+function gsa_cpat_og_user_access_alter(&$temp_perm, $context) {
+  if($context['group']->gid == 21 && !user_is_anonymous()){
+  	 $temp_perm['view group_audience field'] = FALSE;
+  	 $temp_perm['view field_gsa_teaming_responsibility field'] = TRUE; 
+  	 $temp_perm['view field_gsa_teaming_partner field'] = TRUE;
+  	 $temp_perm['view field_gsa_period_of_performance field'] = TRUE;
+  }
+}
+
+
+
+
+/**
+ * Implements hook_date_formats().
+ */
+function gsa_cpat_date_formats() {
+  $formats = array();
+  $formats[] = array(
+    'type' => GSA_CPAT_DATE_TYPE,
+    'format' => GSA_CPAT_DATE_FORMAT,
+    'locales' => array(),
+  );
+  variable_set('date_format_' . GSA_CPAT_DATE_TYPE, GSA_CPAT_DATE_FORMAT);
+  return $formats;
+}
+
+/**
+ * Implements hook_date_format_types().
+ */
+function gsa_cpat_date_format_types() {
+  $types = array();
+  $types[GSA_CPAT_DATE_TYPE] = t('CTAT Date');
+  return $types;
+}
+
+/**
+* Implements gs_cpat_date_combo_process_alter().
+*/
+function gsa_cpat_date_combo_process_alter(&$element, $form_state, $context){
+	
+	if($element['#field_name'] == 'field_gsa_period_of_performance'){
+		$element['show_todate']['#title'] = t('Include End Date');
+		$element['show_todate']['#default_value'] = 1;
+	}
+}
+
+
+
+

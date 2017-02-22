@@ -1,0 +1,7 @@
+name = "GSA Comments Like"
+package = "GSA"
+core = "7.x"
+description = "Provides a like/unlike feature for comments, with notifications."
+files[] = gsa_clike.module
+dependencies[] = gsa_wall
+dependencies[] = heartbeat

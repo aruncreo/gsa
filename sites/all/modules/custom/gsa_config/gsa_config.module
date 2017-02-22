@@ -1,0 +1,805 @@
+<?php
+
+include_once('gsa_config.features.inc');
+
+/**
+ * The access realm of group member.
+ */
+define('OG_DEFAULT_ACCESS_AUTHENTICATED_REALM', 'group_default_access_authenticated');
+
+/**
+ * Implements hook_perm()
+ */
+function gsa_config_perm() {
+  return array('administer gsa');
+}
+
+/**
+ * Implements hook_menu()
+ */
+function gsa_config_menu() {
+  $items = array();
+  $items['admin/config/gsa'] = array(
+    'title' => 'GSA Configuration',
+    'description' => 'Settings for Interact',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('gsa_config_admin_settings'),
+    'access arguments' => array('administer gsa'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_menu_alter()
+ */
+function gsa_config_menu_alter(&$items) {
+
+  // Order the tabs on the user pages
+  $items['user/%user']['weight'] = -50;
+  $items['user/%user/view']['weight'] = -50;
+  $items['user/%user/edit']['weight'] = -49;
+  $items['user/%user/password']['weight'] = -48;
+
+  // Take over the personal contact form page callback
+  // ** Disabled, testing required.
+//  $items['user/%user/contact']['page callback'] = 'gsa_config_contact_user_page';
+//  $items['user/%user/contact']['file'] = 'gsa_config.pages.inc';
+//  $items['user/%user/contact']['file path'] = drupal_get_path('module', 'gsa_config');
+  
+}
+
+/**
+ * Implements hook_block_info()
+ */
+function gsa_config_block_info() {
+  $blocks[0]['info'] = t('Join now!');
+  $blocks['sitewide_rss']['info'] = t('Site-wide RSS link');
+  return $blocks;
+}
+
+
+/**
+ * Implements hook_block_view()
+ */
+function gsa_config_block_view($delta = '') {
+  switch ($delta) {
+    case 'sitewide_rss':
+      $block['subject'] = t('Subscribe to !site', array('!site' => variable_get('site_name', '')));
+      $block['content'] = _gsa_config_rss_block();
+      break;
+
+    case 0:
+      $block['subject'] = t('New to Interact?');
+      $block['content'] = _gsa_config_join_block();
+      break;
+  }
+  return $block;
+}
+
+
+/**
+ * Implements hook_block_configure()
+ */
+function gsa_config_block_configure($delta = '') {
+  $form = array();
+  if ($delta == 'sitewide_rss') {
+    $form['gsa_config_sitewide_rss_description'] = array(
+        '#type' => 'textarea',
+        '#title' => t('Description'),
+        '#description' => t('This will be displayed before the RSS icon.'),
+        '#default_value' => variable_get('gsa_config_sitewide_rss_description','<p>Get updates via RSS.</p>'),
+    );
+  }
+  return $form;
+}
+
+
+
+/**
+ * Implements hook_block_save()
+ */
+function gsa_config_block_save($delta = '', $edit = array()) {
+  if ($delta == 'sitewide_rss') {
+    variable_set('gsa_config_sitewide_rss_description',$edit['gsa_config_sitewide_rss_description']);
+  }
+}
+
+/**
+ * Implements hook_views_default_views_alter()
+ */
+function gsa_config_views_default_views_alter(&$views) {
+  // Remove group icons from new groups block
+  if (isset($views['og_dashboard_groups']) && is_array($views['og_dashboard_groups']->display)) {
+    foreach ($views['og_dashboard_groups']->display as $did => $display) {
+      unset($views['og_dashboard_groups']->display[$did]->display_options['fields']['field_group_image_fid']);
+    }
+  }
+}
+
+/**
+ * Produce the 'Join now!' block
+ */
+function _gsa_config_join_block() {
+  global $user;
+  
+  // Only anonymous users can view
+  if ($user->uid) {
+    return;
+  }
+  
+  // Don't show on the registration page
+  if (!($_GET['q'] == 'user/register')) {
+    $form['submit'] = array(
+      '#type' => 'submit',
+      '#value' => t('Join now!'),
+    );
+    //return drupal_get_form($form);
+    return theme('gsa_join_now_block');
+  }
+}
+
+/**
+ * Produce the site-wide RSS block
+ */
+function _gsa_config_rss_block() {
+//  $icon = theme('image', 'misc/feed.png', t('RSS feed'), t('RSS feed'));
+
+  $variables['url'] = 'feed';
+  $variables['title'] = t('RSS feed');
+  $variables['large'] = true;
+  
+  $content = '<div class="sitewide-rss-icon">' . theme('feed_icon', $variables) . '</div>';
+  $content .= '<div class="sitewide-rss-description">';
+  $content .= l(variable_get('gsa_config_sitewide_rss_description',null), 'feed', array('html' => true));
+  $content .= '</div>';
+//  $content .= l($icon, 'feed', array('html' => TRUE));
+  return $content;
+}
+
+/**
+ *  Administration settings
+ */
+function gsa_config_admin_settings() {
+  $form = array();
+  
+  $form['registration'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Registration'),
+  );
+  $form['registration']['gsa_config_user_register_email_description'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Email field description'),
+    '#description' => t('Optional replacement for Drupal\'s standard field description on the user registration form.'),
+    '#default_value' => variable_get('gsa_config_user_register_email_description', NULL),
+  );  
+  $form['registration']['gsa_special_message_domains'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Email domains'),
+    '#description' => t('Specify the email domains for which the special message below will be displayed to upon site registration. Each domain should be separated with a comma and be an entire domain. (Eg, gsa.gov, gov.mil)'),
+    '#default_value' => variable_get('gsa_special_message_domains', ''),
+  );
+  $form['registration']['gsa_special_message'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Registration message'),
+    '#description' => t('Provide the message that will be displayed to registering users with the email domains listed above.'),
+    '#default_value' => variable_get('gsa_special_message', ''),
+  );
+  
+  return system_settings_form($form);
+}
+
+/**
+ * Implements hook_init()
+ */
+function gsa_config_init() {
+  global $user;
+
+  // If og_get_group_context() doesn't work, then neither does
+  // og_user_roles. og_get_group_context() is only reliable when viewing
+  // a group node or group post, but not so much with contrib modules
+  // or views that take in a group nid.
+  // So, if og_get_group_context() fails but og_features_get_group_context()
+  // succeeded, then we have to apply the group roles
+  /* if (!og_get_group() && ($group = og_features_get_group_context())) {
+    og_user_roles_grant_roles($user, $group);
+  } */
+
+  if ($user->uid != 1) {
+    // Prevent messages regarding directory creation from showing to
+    // users are aren't UID 1
+    if (isset($_SESSION['messages']['status'])) {
+      foreach ($_SESSION['messages']['status'] as $key => $message) {
+        if (strstr(strtolower($message), t('the directory'))) {
+          unset($_SESSION['messages']['status'][$key]);
+        }
+      }
+      
+      if (isset($_SESSION['messages']['status']) && empty($_SESSION['messages']['status'])) {
+        unset($_SESSION['messages']['status']);
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_user_insert()
+ */
+function gsa_config_user_insert(&$edit, $account, $category) {
+  // Fetch the email domains that should receive a message
+  $domains = str_replace(' ', '', variable_get('gsa_special_message_domains', ''));
+
+  // Fetch the message to display
+  $message = variable_get('gsa_special_message', '');
+
+  // Make sure we have both required items
+  if ($domains && $message) {
+    $domains = explode(',', $domains);
+
+    // See if the user's email is in our domain list
+    if (array_search(substr($account->mail, stripos($account->mail, "@") + 1), $domains) !== FALSE) {
+      // Display the message
+      drupal_set_message(str_replace("\n", '<br/>', $message));
+    }
+  }
+
+}
+
+
+
+/**
+ * Implements hook_form_alter()
+ */
+function gsa_config_form_alter(&$form, &$form_state, $form_id) {
+  global $user;
+  $group = og_context();
+  
+  // Alter the node form
+  if ($form['#id'] == 'group-node-form' || og_is_group_content_type('node', $form['#node']->type)) {
+  	$feature_settings = variable_get('og_features_settings_node_group',null);
+  	$og_group_default = $feature_settings['og_public_default'];
+  	($og_group_default == 2 || $og_group_default == 1)?$og_group_default=1:$og_group_default=0;
+    // Extract the node
+    if ($node = $form['#node']) {
+      // See if this is a group
+      if (og_is_group_type('node', $node->type)) {
+        // Provide a form widget to choose the post publicity default
+        $form['og_options']['og_public_default'] = array(
+          '#type' => 'select',
+          '#title' => t('Group content default access'),
+          '#options' => array(
+            0 => t('Private'),
+            1 => t('Public'),
+          ),
+          '#description' => t('Select the default access for new posts within this group.'),
+		  '#default_value' => ($group != NULL)?(og_features_feature_is_disabled('og_public_default',$group)?0:1):$og_group_default,
+        );
+      }
+      // See if this is a group post
+      else if (og_is_group_content_type('node', $node->type)) {  //http://drupal.org/node/1075994
+        // Only act if this is a new node
+        $args = arg();
+        if (!$node->nid) {
+          // Determine the group we're in
+          if ($group = og_features_get_group_context()) {
+            // Determine if this post should default to public
+            $private = og_features_feature_is_disabled('og_public_default', $group);
+            // Set the default value for public/private based on the settings
+            $form['group_content_access']['und']['#default_value'][0] = 0;
+          }
+        }
+      }
+    }
+  }
+
+  if ($form['#id'] == 'user-pass') {
+
+    $form['name'] = array(
+        '#type' => 'textfield',
+        '#title' => t('E-mail address'),
+        '#description' => t('Please enter the email address associated with your @s account. We’ll send an email containing your username and a one-time login link.', array('@s' => variable_get('site_name', 'Drupal'))),
+        '#size' => 60,
+        '#maxlength' => max(USERNAME_MAX_LENGTH, EMAIL_MAX_LENGTH),
+        '#required' => TRUE,
+      );
+
+    $form['actions']['submit'] = array(
+        '#type' => 'submit',
+        '#value' => t('E-mail username and new password'),
+      );
+  }
+
+  if ($form['#id'] == 'user-pass-reset') {
+
+    $form['message'] = array(
+        '#markup' => '',
+      );
+
+    $form['help'] = array(
+        '#markup' => '',
+      );
+  }
+
+  if ($form['#id'] == 'user-profile-form') {
+
+    $account = $form['#user'];
+	global $user;
+    if($user->uid != arg(1) and !(in_array('site admin', $user->roles) or in_array('site administrator', $user->roles))){
+	$form['account']['name'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Username'),
+        '#maxlength' => USERNAME_MAX_LENGTH,
+        '#description' => t('Cannot change the username here – this is for display only'),
+        '#disabled' => TRUE,
+        '#attributes' => array('class' => array('username')),
+        '#default_value' => (!$register ? $account->name : ''),
+        '#weight' => -10,
+      );
+}else{
+    $form['account']['name'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Username'),
+        '#maxlength' => USERNAME_MAX_LENGTH,
+        '#description' => t(''),
+        '#disabled' => FALSE,
+        '#attributes' => array('class' => array('username')),
+        '#default_value' => (!$register ? $account->name : ''),
+        '#weight' => -10,
+      );
+}
+  }
+
+  if ($form['#id'] == 'user-register-form') {
+
+    $account = $form['#user'];
+    $register = ($form['#user']->uid > 0 ? FALSE : TRUE);
+    $admin = user_access('administer users');
+
+    $form['account']['name'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Username'),
+        '#maxlength' => USERNAME_MAX_LENGTH,
+        '#description' => t('Your username is different than your e-mail address, but it may be helpful to use a portion of your e-mail address so it is easy to remember. Your username can include letters, numbers, spaces, hyphens, apostrophes, and underscores.'),
+        '#required' => TRUE,
+        '#attributes' => array('class' => array('username')),
+        '#default_value' => (!$register ? $account->name : ''),
+        '#access' => ($register || ($user->uid == $account->uid && user_access('change own username')) || $admin),
+        '#weight' => -10,
+    );
+  }
+
+  // Setting 'always enabled' fields to be not togglable
+  if ($form['#id'] == 'og-features-feature-form') {
+
+    $registry = og_features_get_registry();
+    $group = og_context();  
+
+    // Iterate all the available features to provide a toggle switch
+    foreach ($registry as $key => $feature) {
+      if (!og_features_feature_can_toggle($group, $key)) {
+
+        if (!og_features_feature_is_disabled($key, $group)) {
+
+          $form["feature-{$key}"]["name-{$key}"] = array(
+            '#type' => 'item',
+            '#markup' => $feature->name,
+          );
+          $form["feature-{$key}"]["description-{$key}"] = array(
+            '#type' => 'item',
+            '#markup' => $feature->description,
+          );
+          $form["feature-{$key}"]["toggle-{$key}"] = array(
+            '#type' => 'checkbox',
+            '#default_value' => 1,
+            '#disabled' => TRUE,
+          );
+        }
+      }
+    }
+  }
+
+  if ($form['#id'] == 'user-login') {
+
+    // If we are already logged on, go to the user page instead.
+    if ($user->uid) {
+      drupal_goto('user/' . $user->uid);
+    }
+
+    // Display login form:
+    $form['name'] = array('#type' => 'textfield',
+      '#title' => t('Username'),
+      '#size' => 60,
+      '#maxlength' => USERNAME_MAX_LENGTH,
+      '#required' => TRUE,
+    );
+
+    $form['name']['#description'] = t('Enter your @s username. </br>Hint: Your username may be different from your email address. If you do not remember your username, please request a <a href="/user/password">new password</a> and it will be sent to you.', array('@s' => variable_get('site_name', 'Drupal')));
+    $form['pass'] = array('#type' => 'password',
+      '#title' => t('Password'),
+      '#description' => t('Enter the password that accompanies your username.'),
+      '#required' => TRUE,
+    );
+    $form['#validate'] = user_login_default_validators();
+    $form['actions'] = array('#type' => 'actions');
+    $form['actions']['submit'] = array('#type' => 'submit', '#value' => t('Log in'));
+
+  }
+}
+
+/**
+* Implements hook_node_insert(). 
+* 
+* @param $node
+*  the node object to be inserted
+*/
+function gsa_config_node_insert($node){
+  if ($node->type == 'group') {
+    // Load the feature settings for the group
+    og_features_load_disabled_features($node);
+  
+    // Alter the disabled list based on the form
+    if ($node->og_public_default) {
+      // Public default was chosen, so make sure feature is not disabled
+      unset($node->features_disabled['og_public_default']);
+    }
+    else {
+      // Private default was chosen, so disable the feature
+      $node->features_disabled['og_public_default'] = 'og_public_default';
+    }
+  }
+}
+
+/**
+* Implements hook_node_update(). 
+* 
+* @param $node
+*  the node object to be updated
+*/
+function gsa_config_node_update($node){
+ if ($node->type == 'group') {
+  // Fetch the og features registry
+  $registry = og_features_get_registry();
+  $group = og_context();
+  $features = array();
+  
+
+  // Iterate all the available features to provide a toggle switch
+  foreach ($registry as $key => $feature) {
+    // Make sure this feature can be toggled by this group
+    if (!og_features_feature_can_toggle($group, $key)) {
+      continue;
+    }elseif(og_features_feature_can_toggle($group, $key) && $key == 'og_public_default'){
+			$features[$key] = $node->og_public_default;
+			continue;
+	}
+
+    $features[$key] = isset($group->features_disabled[$key]) ? 0 : 1;
+
+  }
+
+	if(isset($group->gid)){
+		og_features_save_feature_settings($group, $features);
+	}
+ }
+}
+ 
+/**
+* Implements hook_node_access_records_alter.
+*/
+function gsa_config_node_access_records_alter(&$grants, $node){
+
+	 if (isset($node->{OG_CONTENT_ACCESS_FIELD}[LANGUAGE_NONE][0]['value'])) {
+	 	 if($node->{OG_CONTENT_ACCESS_FIELD}[LANGUAGE_NONE][0]['value'] == 0){
+	 	 	$access = FALSE;
+	     if ($field = field_info_field(OG_ACCESS_FIELD)) {
+          // Access should be determined by its groups. If group content belongs
+          // to several groups, and one of them is private, then the group
+          // content will private as-well.
+          $gids = og_get_entity_groups('node', $node);
+
+          $groups = og_load_multiple($gids);
+
+          // If group content belongs to several groups, and one of them is
+          // private, then this variable decides what should happen -- if the
+          // group content will be private as-well or become public.
+          // By default, if one group is private then the group content will be
+          // private.
+          $strict_private = variable_get('group_access_strict_private', 1);
+
+          $total_count = 0;
+          $count = 0;
+
+          foreach ($groups as $group) {
+          	if(og_features_feature_is_disabled('og_public_default',$group)){
+							$count = 1;
+						}
+        
+
+            if ($strict_private) {
+              // There is at least one private group and 'strict private' is
+              // TRUE so this group content should be private.
+              if ($count) {
+                $access = TRUE;
+                break;
+              }
+            }
+            else {
+              // 'strict private' is FALSE so count all the groups, and only if
+              // all of them are private then this group content should be
+              // private.
+              $total_count += $count;
+            }
+          }
+          if ($total_count == count($gids)) {
+            // All groups are private.
+            $access = TRUE;
+          }
+       }
+       
+       
+       if ($access && $gids) {
+    	   foreach ($gids as $gid) {
+      	   $grants[] = array (
+        			'realm' => OG_DEFAULT_ACCESS_AUTHENTICATED_REALM,
+        			'gid' => $gid,
+        			'grant_view' => 1,
+        			'grant_update' => 0,
+        			'grant_delete' => 0,
+        			'priority' => 0,
+     			 );
+    		}
+  		}
+       
+       
+       
+	}
+  }	
+}
+
+/**
+ * Implements hook_node_grants().
+ */
+function gsa_config_node_grants($account, $op) {
+  $grants = array();
+  if ($op == 'view' && $groups = og_get_entity_groups('user', $account)) {
+    foreach ($groups as $gid => $value) {
+      // Not all the groups are nodes, but in order to save loading the groups
+      // we grant all group IDs.
+      $grants[OG_DEFAULT_ACCESS_AUTHENTICATED_REALM][] = $gid;
+    }
+  }
+
+  return $grants;
+}
+
+/**
+ * Implements hook_form_user_registration_form_alter().
+ *
+ * Alter content on the user registration form.
+ */
+function gsa_config_form_user_register_form_alter(&$form, &$form_state) {
+  if ($description = variable_get('gsa_config_user_register_email_description', FALSE)) {
+    $form['account']['mail']['#description'] = check_plain($description);
+  }
+}
+
+/**
+ * Implements hook_form_user_profile_form_alter()
+ *
+ * Alter the user profile form
+ */
+function gsa_config_form_user_profile_form_alter(&$form, &$form_state) {
+  if (isset($form['heartbeat_activity_settings_select'])) {
+    $form['heartbeat_activity_settings_select']['heartbeat_activity_settings']['#collapsed'] = TRUE;
+  }
+}
+
+/**
+ * Implements hook_form_user_pass_reset_alter().
+ *
+ * Alter the language about passwords to make it appropriate for new users.
+ */
+function gsa_config_form_user_pass_reset_alter(&$form, &$form_state) {
+  $form['message']['#markup'] = str_replace('change your password', 'create or change your password', $form['message']['#markup']);
+}
+
+/**
+ * Implements hook_preprocess_status_messages().
+ *
+ * Alter the language about passwords to make it appropriate for new users.
+ */
+function gsa_config_preprocess_status_messages(&$vars) {
+  if (isset($_SESSION['messages']['status'])) {
+    foreach ($_SESSION['messages']['status'] as $key => $message) {
+      if ($message == 'You have just used your one-time login link. It is no longer necessary to use this link to log in. Please change your password.') {
+        $_SESSION['messages']['status'][$key] = str_replace('change your password', 'create or change your password', $message);
+      }
+    }
+  }
+
+  if (isset($_SESSION['messages']['error'])) {
+    foreach ($_SESSION['messages']['error'] as $key => $message) {
+      if ($message == 'Sorry, unrecognized username or password. <a href="/user/password">Have you forgotten your password?</a>') {
+        $_SESSION['messages']['error'][$key] = str_replace('Have you forgotten your password', 'Have you forgotten your username or password', $message);
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_content_default_fields_alter()
+ *
+ * Alter the default cck fields right before they are cached into the database.
+ *
+ * @param &$fields
+ *   By reference. The fields that have been declared by another feature.
+ */
+function gsa_config_content_default_fields_alter(&$fields) {
+  // Force image fields to use a custom alt and title text
+  foreach ($fields as $key => $field) {
+    switch ($key) {
+      case 'blog-field_content_images':
+      case 'group-field_group_image':
+      case 'notice-field_content_images':
+      case 'discussion-field_content_images':
+      case 'event-field_content_images':
+      case 'poll-field_content_images':
+      case 'idea-field_content_images':
+        $fields[$key]['widget']['custom_alt'] = 1;
+        $fields[$key]['widget']['custom_title'] = 1;
+        break;
+    }
+  }
+}
+
+/**
+ * Implements hook_webform_results_access()
+ */
+function gsa_config_webform_results_access($node, $account) {
+  // Allow group admins to see the results
+  if (og_is_group_post_type($node->type)) {
+    // Published
+    if ($node->status) {
+      // See if this is a group admin
+      if (isset($node->og_groups)) {
+        foreach ($node->og_groups as $gid) {
+          if (og_is_group_admin(node_load($gid), $account)) {
+            return TRUE;
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_webform_submission_access()
+ */
+function gsa_config_webform_submission_access($node, $submission, $op, $account) {
+  if ($ret = gsa_config_webform_results_access($node, $account)) {
+    return $ret;
+  }
+}
+
+/**
+ * Implements hook_og_features_registry()
+ */
+function gsa_config_og_features_registry() {
+  module_load_include('inc', 'gsa_config', 'gsa_config.og_features');
+  return _gsa_config_og_features_registry();
+}
+
+/**
+ * Determine if a user has an @gsa.gov email address
+ *
+ * @param $user
+ *   A user object
+ * @return
+ *   TRUE if the user has an @gsa.gov email address
+ */
+function gsa_config_user_is_gsa($user) {
+  return strtolower(substr($user->mail, stripos($user->mail, "@") + 1)) == 'gsa.gov';
+}
+
+/**
+ * Determine if a user has an @*.gov or @*.mil email address
+ *
+ * @param $user
+ *   A user object
+ * @return
+ *   TRUE if the user has an @gsa.gov email address
+ */
+function gsa_config_user_is_gov_or_mil($user) {
+  $extension = strtolower(substr($user->mail, -4));
+  return $extension == '.gov' || $extension == '.mil';
+}
+
+
+/**
+ * Determine whether autojoin is allowed for all users
+ *
+ */
+function gsa_config_user_is_all($user) {
+  return strtolower(substr($user->mail, -4));
+}
+
+/**
+ * Implements hook_theme()
+ */
+function gsa_config_theme() {
+  return array(
+    'gsa_join_now_block' => array(),
+  );
+}
+
+/**
+ * Theme wrapper for "Join now!" block
+ */
+function theme_gsa_join_now_block() {
+  return '<div class="gsa-button-links"><div class="inner">' . l(t('Join now!'), 'user/register') . '</div></div>';
+}
+
+/**
+* Implements hook_gsa_group_page_group_menu_alter().
+*/
+function gsa_config_gsa_group_page_group_menu_alter(&$menu,$group,$node){
+//	$menu['administer']['items']['feeds'] = l(t('Group feeds'), "group-feeds",array('query' =>  array("gids_{$group->bundle_name}" => array($group->gid))));
+}
+
+
+/**
+* Implements hook_node_delete().
+*/
+function gsa_config_node_delete($node){
+	if($node->type == 'group_feed'){
+		$query = db_select('feeds_item','fi');
+  		$query->fields('fi',array('entity_id'));
+  		$query->condition('fi.feed_nid', $node->nid);
+  		$result = $query->execute()->fetchAll();
+  		$feed_nid_array = array();
+  		foreach($result as $row){
+  			$feed_nid_array[]= $row->entity_id;
+  		}	
+  		
+  		if(!empty($feed_nid_array)){
+  			$feed_item_deleted = db_delete('feeds_item')
+  			->condition('entity_type', 'node')
+    		->condition('entity_id', $feed_nid_array,'IN')
+  			->execute();
+  			
+			node_delete_multiple($feed_nid_array);
+		}		
+	}
+}
+
+/**
+* Implements hook_image_default_styles().
+*/
+function gsa_config_image_default_styles() {
+  $styles = array();
+
+  // image preset for the big image
+  $styles['galleria_zoom'] = array(
+    'effects' => array(
+      array(
+        'name' => 'image_scale',
+        'data' => array('width' => 450, 'height' => 300, 'upscale' => 1),
+        'weight' => 0,
+      ),
+    )
+  );
+
+  // image preset for thumbnails
+  $styles['galleria_thumb'] = array(
+    'effects' => array(
+      array(
+        'name' => 'image_scale',
+        'data' => array('width' => 50, 'height' => 40, 'upscale' => 1),
+        'weight' => 0,
+      ),
+    )
+  );
+
+  return $styles;
+}
+

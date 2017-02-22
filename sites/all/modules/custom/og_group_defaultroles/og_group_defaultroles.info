@@ -1,0 +1,7 @@
+name = "Organic Groups Default Roles"
+description = "Specify default user roles per group"
+version = "7.x-1.0beta1"
+php = 5.3
+core = 7.x
+dependencies[] = og
+

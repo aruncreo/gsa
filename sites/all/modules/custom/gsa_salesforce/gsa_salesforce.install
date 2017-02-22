@@ -1,0 +1,200 @@
+<?php
+
+/**
+ * Implements hook_schema().
+ */
+function gsa_salesforce_schema() {
+  $schema = array();
+  
+  $schema['gsa_salesforce_user_sfid'] = array(
+    'description' => 'A table mapping users with their Salesforce ID',
+    'fields' => array(
+      'uid' => array(
+        'type' => 'int', 
+        'unsigned' => TRUE, 
+        'not null' => TRUE, 
+        'default' => 0, 
+        'description' => 'The user\'s Drupal ID.',
+      ),
+      'type' =>  array(
+        'type' => 'varchar', 
+        'length' => 64, 
+        'not null' => TRUE, 
+        'default' => '', 
+        'description' => 'The type of Salesforce object.',
+      ),
+      'sfid' => array(
+        'type' => 'varchar', 
+        'length' => 255, 
+        'not null' => TRUE, 
+        'description' => 'The Salesforce object ID associated with the user.',
+      ),
+      'updateflag' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => 'Flag indicating SFDC an update is required.',
+      ),
+    ),
+    'primary key' => array('uid'),
+    'indexes' => array('updateflag' => array('updateflag')),
+  );
+
+  return $schema;
+}
+
+/**
+ * Implements hook_install().
+ */
+function gsa_salesforce_install() {
+  gsa_salesforce_set_module_weight();
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function gsa_salesforce_uninstall() {
+  db_delete('variable')
+  ->condition('name', 'gsa_salesforce_%', 'LIKE')
+  ->execute();
+}
+
+/**
+ * Set the weight of this module
+ */
+function gsa_salesforce_set_module_weight() {
+  db_update('system')
+    ->fields(array(
+      'weight' => 1,
+    ))
+    ->condition('name', 'gsa_salesforce')
+    ->execute();
+}
+
+/**
+ * Add the email optout profile field
+ */
+function gsa_salesforce_update_6000() {
+  $field = new stdClass;
+  $field->title = t('Do not contact me about GSA offerings');
+  $field->name = 'profile_email_optout';
+  $field->explanation = t('Do not use my information to better serve me in the future by contacting me about GSA offerings. GSA will never sell or rent your information to anyone. Our privacy policy details our practices on how we use and store personal information.');
+  $field->category = t('Personal information');
+  $field->type = 'checkbox';
+  $field->weight = -5;
+  $field->required = 0;
+  $field->register = 1;
+  $field->visibility = 1;
+  $field->autocomplete = 0;
+  drupal_write_record('profile_fields', $field);
+  return array();
+}
+
+/**
+ * Set the new Salesforce enabled variable to TRUE if missing.
+ */
+function gsa_salesforce_update_6001() {
+  if (variable_get('gsa_salesforce_enabled', NULL) == NULL) {
+    variable_set('gsa_salesforce_enabled', 1);
+  }
+  return array();
+}
+
+/**
+ * Update the module weight
+ */
+function gsa_salesforce_update_7000() {
+  gsa_salesforce_set_module_weight();
+}
+
+/**
+ * Re-add the location profile field
+ */
+function gsa_salesforce_update_7001() {
+  // Fetch the fid for the location field
+  $fid = db_select('profile_field', 'p')
+   ->fields('p', array('fid'))
+   ->condition('name', 'profile_location')
+   ->execute()
+   ->fetchField();
+  
+  // Delete the location profile field
+  db_delete('profile_field')
+    ->condition('fid', $fid)
+    ->execute();
+  db_delete('profile_value')
+    ->condition('fid', $fid)
+    ->execute();
+
+  // Add the new field
+  db_insert('profile_field')
+    ->fields(array(
+      'title' => t('Location'),
+      'name' => 'profile_location',
+      'explanation' => '',
+      'category' => t('Personal information'),
+      'type' => 'selection',
+      'weight' => -8,
+      'required' => 1,
+      'register' => 1,
+      'visibility' => 1,
+      'autocomplete' => 0,
+      'options' => NULL,
+    ))
+    ->execute();
+}
+
+/**
+ * Create the procurement role field
+ */
+function gsa_salesforce_update_7002() {
+  db_insert('profile_field')
+  ->fields(array(
+    'title' => t('Procurement role'),
+    'name' => 'profile_procurement_role',
+    'explanation' => t('Specify the category which best describes your role.'),
+    'category' => t('Work information'),
+    'type' => 'selection',
+    'weight' => -6,
+    'required' => 1,
+    'register' => 1,
+    'visibility' => 1,
+    'autocomplete' => 0,
+    'options' => NULL,
+  ))
+  ->execute();
+}
+
+/**
+ * Add the update field
+ */
+function gsa_salesforce_update_7003() {
+  $fieldspec = array(
+    'type' => 'int',
+    'unsigned' => TRUE,
+    'not null' => TRUE,
+    'default' => 0,
+    'description' => 'Flag indicating an SFDC update is required.',
+  );
+  db_add_field('gsa_salesforce_user_sfid', 'updateflag', $fieldspec);
+  db_add_index('gsa_salesforce_user_sfid', 'updateflag', array('updateflag'));
+}
+
+/**
+ * Correct namespace for email domain config variables
+ */
+function gsa_salesforce_update_7004() {
+  $agencies = db_select('variable', 'v')
+  ->fields('v', array('name'))
+  ->condition('v.name', 'salesforce_agency_%', 'LIKE')
+  ->execute();
+  
+  foreach ($agencies as $record) {
+    $value = variable_get($record->name, 0);
+    if ($value == 1) {
+      dpm($record->name . ': ' . $value);
+      variable_set('gsa_' . $record->name, $value);
+    }
+  }
+}

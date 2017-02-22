@@ -1,0 +1,26 @@
+.webinar-message {
+  border: 1px solid #DDDDDD;
+  padding: 15px 8px;
+  margin: 20px 0;
+  text-align: center;
+  background: #F5F5F5;
+  font-size: 110%;
+  font-weight: bold;
+  -webkit-border-radius: 5px;
+  -moz-border-radius: 5px;
+}
+.webinar-message .form-item {
+  margin: 0;
+}
+.webinar-message .form-item .description {
+  font-size: 75%;
+  font-weight: normal;
+  color: #000;
+  padding-top: 5px;
+}
+.webinar-loading {
+  display: none;
+}
+.webinar-loading img {
+  padding: 0 5px;
+}
